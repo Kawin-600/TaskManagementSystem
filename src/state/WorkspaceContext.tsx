@@ -8,6 +8,8 @@ import {
   type ReactNode,
 } from 'react';
 import {
+  canManageMilestones,
+  getVisibleMilestones,
   canAccessAdmin,
   canApproveOrRejectTask,
   canCommentOnTask,
@@ -25,6 +27,9 @@ import {
 } from '../domain/rbac';
 import { defaultRepository, type WorkspaceRepository } from '../services/workspaceRepository';
 import type {
+  CreateMilestoneInput,
+  Milestone,
+  UpdateMilestoneInput,
   CreateProjectInput,
   CreateTaskInput,
   CreateUserInput,
@@ -44,8 +49,10 @@ interface WorkspaceContextValue {
   users: User[];
   projects: Project[];
   tasks: Task[];
+  milestones: Milestone[];
   visibleProjects: Project[];
   visibleTasks: Task[];
+  visibleMilestones: Milestone[];
   visibleTeamUsers: User[];
   isLoading: boolean;
   createProject: (input: CreateProjectInput) => Promise<Project | null>;
@@ -59,6 +66,9 @@ interface WorkspaceContextValue {
   rejectTask: (taskId: string) => Promise<boolean>;
   deleteTask: (taskId: string) => Promise<boolean>;
   addComment: (taskId: string, text: string) => Promise<boolean>;
+  createMilestone: (input: CreateMilestoneInput) => Promise<Milestone | null>;
+  updateMilestone: (milestoneId: string, input: UpdateMilestoneInput) => Promise<Milestone | null>;
+  deleteMilestone: (milestoneId: string) => Promise<boolean>;
   createUser: (input: CreateUserInput) => Promise<User | null>;
   updateUserRole: (userId: string, newRole: UserRole) => Promise<boolean>;
   deleteUser: (userId: string) => Promise<boolean>;
@@ -84,6 +94,7 @@ export function WorkspaceProvider({
   const [users, setUsers] = useState<User[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [milestones, setMilestones] = useState<Milestone[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   const reload = useCallback(async () => {
@@ -91,6 +102,7 @@ export function WorkspaceProvider({
     setUsers(snap.users);
     setProjects(snap.projects);
     setTasks(snap.tasks);
+    setMilestones(snap.milestones);
   }, [repository]);
 
   useEffect(() => {
@@ -102,6 +114,7 @@ export function WorkspaceProvider({
         setUsers(snap.users);
         setProjects(snap.projects);
         setTasks(snap.tasks);
+        setMilestones(snap.milestones);
       })
       .catch((err) => {
         if (!active) return;
@@ -123,6 +136,11 @@ export function WorkspaceProvider({
   const visibleTasks = useMemo(
     () => (currentUser ? getVisibleTasks(currentUser, projects, tasks) : []),
     [currentUser, projects, tasks],
+  );
+
+  const visibleMilestones = useMemo(
+    () => (currentUser ? getVisibleMilestones(currentUser, projects, milestones) : []),
+    [currentUser, projects, milestones],
   );
 
   const visibleTeamUsers = useMemo(
@@ -451,6 +469,68 @@ export function WorkspaceProvider({
     [currentUser, repository, reload, showToast],
   );
 
+  const createMilestone = useCallback(
+    async (input: CreateMilestoneInput): Promise<Milestone | null> => {
+      const project = projects.find((p) => p.id === input.projectId);
+      if (!currentUser || !project || !canManageMilestones(currentUser, project)) {
+        showToast('คุณไม่มีสิทธิ์จัดการ Milestone ของโปรเจคนี้', 'error');
+        return null;
+      }
+      try {
+        const created = await repository.createMilestone(input);
+        await reload();
+        showToast('เพิ่ม Milestone ใหม่เรียบร้อยแล้ว', 'success');
+        return created;
+      } catch (err) {
+        showToast(formatRepoError(err, 'เพิ่ม Milestone ไม่สำเร็จ'), 'error');
+        return null;
+      }
+    },
+    [currentUser, projects, repository, reload, showToast],
+  );
+
+  const updateMilestone = useCallback(
+    async (milestoneId: string, input: UpdateMilestoneInput): Promise<Milestone | null> => {
+      const milestone = milestones.find((m) => m.id === milestoneId);
+      const project = projects.find((p) => p.id === milestone?.projectId);
+      if (!currentUser || !milestone || !project || !canManageMilestones(currentUser, project)) {
+        showToast('คุณไม่มีสิทธิ์จัดการ Milestone ของโปรเจคนี้', 'error');
+        return null;
+      }
+      try {
+        const updated = await repository.updateMilestone(milestoneId, input);
+        await reload();
+        showToast('อัปเดต Milestone เรียบร้อยแล้ว', 'success');
+        return updated;
+      } catch (err) {
+        showToast(formatRepoError(err, 'อัปเดต Milestone ไม่สำเร็จ'), 'error');
+        return null;
+      }
+    },
+    [currentUser, milestones, projects, repository, reload, showToast],
+  );
+
+  const deleteMilestone = useCallback(
+    async (milestoneId: string): Promise<boolean> => {
+      const milestone = milestones.find((m) => m.id === milestoneId);
+      const project = projects.find((p) => p.id === milestone?.projectId);
+      if (!currentUser || !milestone || !project || !canManageMilestones(currentUser, project)) {
+        showToast('คุณไม่มีสิทธิ์จัดการ Milestone ของโปรเจคนี้', 'error');
+        return false;
+      }
+      try {
+        await repository.deleteMilestone(milestoneId);
+        await reload();
+        showToast('ลบ Milestone เรียบร้อยแล้ว', 'info');
+        return true;
+      } catch (err) {
+        showToast(formatRepoError(err, 'ลบ Milestone ไม่สำเร็จ'), 'error');
+        return false;
+      }
+    },
+    [currentUser, milestones, projects, repository, reload, showToast],
+  );
+
   const resetSampleData = useCallback(async () => {
     if (!currentUser || !canAccessAdmin(currentUser) || !repository.resetSampleData) {
       return;
@@ -460,6 +540,7 @@ export function WorkspaceProvider({
       setUsers(snap.users);
       setProjects(snap.projects);
       setTasks(snap.tasks);
+      setMilestones(snap.milestones);
       await refreshSession();
       showToast('รีเซ็ตข้อมูลตัวอย่างเรียบร้อยแล้ว', 'success');
     } catch (err) {
@@ -473,8 +554,10 @@ export function WorkspaceProvider({
         users,
         projects,
         tasks,
+        milestones,
         visibleProjects,
         visibleTasks,
+        visibleMilestones,
         visibleTeamUsers,
         isLoading,
         createProject,
@@ -488,6 +571,9 @@ export function WorkspaceProvider({
         rejectTask,
         deleteTask,
         addComment,
+        createMilestone,
+        updateMilestone,
+        deleteMilestone,
         createUser,
         updateUserRole,
         deleteUser,

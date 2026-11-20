@@ -1,4 +1,4 @@
-import type { Project, Task, TaskStatus, User } from '../types/models';
+import type { Milestone, Project, Task, TaskStatus, User } from '../types/models';
 
 export function canViewProject(user: User, project: Project): boolean {
   if (user.role === 'admin') return true;
@@ -125,4 +125,17 @@ export function canModifyUserRole(actingUser: User, targetUserId: string): boole
 
 export function canDeleteUser(actingUser: User, targetUserId: string): boolean {
   return actingUser.role === 'admin' && actingUser.id !== targetUserId;
+}
+
+export function getVisibleMilestones(
+  user: User,
+  projects: Project[],
+  milestones: Milestone[],
+): Milestone[] {
+  const visibleProjectIds = new Set(getVisibleProjects(user, projects).map((p) => p.id));
+  return milestones.filter((m) => visibleProjectIds.has(m.projectId));
+}
+
+export function canManageMilestones(user: User, project: Project): boolean {
+  return canManageProject(user, project);
 }

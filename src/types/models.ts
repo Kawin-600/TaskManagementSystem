@@ -84,3 +84,38 @@ export interface CreateUserInput {
   role: UserRole;
   password?: string;
 }
+
+export type MilestoneStatus = 'completed' | 'in_progress' | 'delayed' | 'not_started';
+
+export interface Milestone {
+  id: string;
+  projectId: string;
+  title: string;
+  ownerId: string;
+  startDate: string;
+  endDate: string;
+  progress: number;
+  /** 1-based phase within the project; several milestones may share one. */
+  phase: number;
+  createdAt: string;
+}
+
+export interface CreateMilestoneInput {
+  projectId: string;
+  title: string;
+  ownerId: string;
+  startDate: string;
+  endDate: string;
+  progress: number;
+  /** Omit to open a new last phase. */
+  phase?: number;
+}
+
+export interface UpdateMilestoneInput {
+  title?: string;
+  ownerId?: string;
+  startDate?: string;
+  endDate?: string;
+  progress?: number;
+  phase?: number;
+}

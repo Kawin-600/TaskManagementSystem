@@ -1,10 +1,11 @@
 import { addDays, getTodayStr } from '../domain/dates';
-import type { Project, Task, User } from '../types/models';
+import type { Milestone, Project, Task, User } from '../types/models';
 
 export function createSeedData(todayStr: string = getTodayStr()): {
   users: User[];
   projects: Project[];
   tasks: Task[];
+  milestones: Milestone[];
 } {
   const users: User[] = [
     {
@@ -252,5 +253,37 @@ export function createSeedData(todayStr: string = getTodayStr()): {
     },
   ];
 
-  return { users, projects, tasks };
+  const ms = (
+    id: string,
+    projectId: string,
+    title: string,
+    ownerId: string,
+    startOffset: number,
+    endOffset: number,
+    progress: number,
+    phase: number,
+  ): Milestone => ({
+    id,
+    projectId,
+    title,
+    ownerId,
+    startDate: addDays(todayStr, startOffset),
+    endDate: addDays(todayStr, endOffset),
+    progress,
+    phase,
+    createdAt: addDays(todayStr, -20),
+  });
+
+  const milestones: Milestone[] = [
+    ms('m101', 'p1', 'วิเคราะห์ความต้องการและออกแบบ UX/UI', 'u2', -19, -8, 100, 1),
+    ms('m102', 'p1', 'พัฒนาระบบชำระเงินและเชื่อมต่อ API', 'u3', -7, 7, 65, 2),
+    ms('m103', 'p1', 'ทดสอบระบบ UAT และเปิดใช้งานจริง (Go-Live)', 'u4', 8, 25, 0, 3),
+    ms('m201', 'p2', 'รวบรวมชุดข้อมูลและออกแบบบทสนทนา', 'u4', -17, -4, 100, 1),
+    ms('m202', 'p2', 'ฝึกโมเดล NLP ภาษาไทย', 'u2', -10, -2, 55, 2),
+    ms('m203', 'p2', 'ทดสอบกับลูกค้าจริงและปรับปรุงคำตอบ', 'u4', 5, 24, 0, 3),
+    ms('m301', 'p3', 'ออกแบบแบบสอบถามและเก็บข้อมูลภาคสนาม', 'u3', -10, 3, 70, 1),
+    ms('m302', 'p3', 'วิเคราะห์ข้อมูลและจัดทำรายงานแนวโน้ม', 'u1', 4, 30, 0, 2),
+  ];
+
+  return { users, projects, tasks, milestones };
 }
