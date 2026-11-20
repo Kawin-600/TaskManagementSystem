@@ -21,7 +21,7 @@ interface TaskListTableProps {
 
 export function TaskListTable({ project, tasks, onTaskClick }: TaskListTableProps) {
   const { currentUser } = useAuth();
-  const { users, deleteTask } = useWorkspace();
+  const { users, visibleMilestones, deleteTask } = useWorkspace();
   const [deletingTask, setDeletingTask] = useState<Task | null>(null);
 
   if (!currentUser) return null;
@@ -58,6 +58,9 @@ export function TaskListTable({ project, tasks, onTaskClick }: TaskListTableProp
             ) : (
               tasks.map((task) => {
                 const assignee = users.find((u) => u.id === task.assigneeId);
+                const milestone = visibleMilestones.find(
+                  (item) => item.id === task.milestoneId && item.projectId === task.projectId,
+                );
                 const totalDays = calculateDaysBetween(task.startDate, task.dueDate);
                 const overdue = isTaskOverdue(task, todayStr);
                 const deletable = canDeleteTask(currentUser, task, project);
@@ -81,6 +84,11 @@ export function TaskListTable({ project, tasks, onTaskClick }: TaskListTableProp
                           </span>
                         )}
                       </div>
+                      {milestone && (
+                        <span className="mt-1 inline-flex rounded-full border border-indigo-100 bg-indigo-50 px-2 py-0.5 text-[10px] font-semibold text-indigo-700">
+                          Milestone: {milestone.title}
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
@@ -138,6 +146,9 @@ export function TaskListTable({ project, tasks, onTaskClick }: TaskListTableProp
           <p className="text-slate-600">
             คุณต้องการลบงาน <strong className="text-slate-900">{deletingTask?.title}</strong>{' '}
             พร้อมความคิดเห็นทั้งหมดอย่างถาวรใช่หรือไม่?
+            {deletingTask?.milestoneId && (
+              <span> Milestone ที่เชื่อมอยู่จะถูกลบไปพร้อมกัน</span>
+            )}
           </p>
           <div className="flex justify-end gap-2">
             <button

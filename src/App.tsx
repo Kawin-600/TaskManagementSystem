@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { BrowserRouter, Navigate, Route, Routes, useNavigate, useParams } from 'react-router-dom';
 import { ShieldAlert } from 'lucide-react';
-import { canAccessAdmin } from './domain/rbac';
+import { canAccessAdmin, canManageUsers } from './domain/rbac';
 import { ToastProvider } from './state/ToastContext';
 import { AuthProvider, useAuth } from './state/AuthContext';
 import { WorkspaceProvider, useWorkspace } from './state/WorkspaceContext';
@@ -53,6 +53,20 @@ function AdminRoute({ children }: { children: JSX.Element }) {
   return children;
 }
 
+function UserManagementRoute({ children }: { children: JSX.Element }) {
+  const { currentUser } = useAuth();
+  if (!currentUser || !canManageUsers(currentUser)) {
+    return (
+      <div className="mx-auto mt-12 max-w-md rounded-2xl border border-rose-200 bg-white p-8 text-center shadow-sm">
+        <ShieldAlert className="mx-auto mb-3 h-10 w-10 text-rose-500" />
+        <h3 className="text-base font-bold text-slate-800">ไม่มีสิทธิ์เข้าถึงหน้านี้</h3>
+        <p className="mt-1 text-xs text-slate-500">สงวนสิทธิ์สำหรับ Admin และผู้บริหาร</p>
+      </div>
+    );
+  }
+  return children;
+}
+
 function ProjectAccessGuard({ children }: { children: JSX.Element }) {
   const { projectId } = useParams();
   const { visibleProjects, isLoading } = useWorkspace();
@@ -77,6 +91,7 @@ export function AppRoutes({
     isOpen: boolean;
     projectId?: string;
     startDate?: string;
+    unassigned?: boolean;
   }>({ isOpen: false });
   const [detailTaskId, setDetailTaskId] = useState<string | null>(null);
   const [projectFormModal, setProjectFormModal] = useState<{
@@ -86,8 +101,17 @@ export function AppRoutes({
   const [membersProjectId, setMembersProjectId] = useState<string | null>(null);
   const [createUserOpen, setCreateUserOpen] = useState(false);
 
-  const handleOpenCreateTask = (opts?: { projectId?: string; startDate?: string }) => {
-    setCreateTaskModal({ isOpen: true, projectId: opts?.projectId, startDate: opts?.startDate });
+  const handleOpenCreateTask = (opts?: {
+    projectId?: string;
+    startDate?: string;
+    unassigned?: boolean;
+  }) => {
+    setCreateTaskModal({
+      isOpen: true,
+      projectId: opts?.projectId,
+      startDate: opts?.startDate,
+      unassigned: opts?.unassigned,
+    });
   };
 
   const handleOpenTaskDetail = (taskId: string) => {
@@ -163,9 +187,9 @@ export function AppRoutes({
           <Route
             path="/admin/users"
             element={
-              <AdminRoute>
+              <UserManagementRoute>
                 <AdminUsersPage onOpenCreateUser={() => setCreateUserOpen(true)} />
-              </AdminRoute>
+              </UserManagementRoute>
             }
           />
           <Route
@@ -185,6 +209,7 @@ export function AppRoutes({
         isOpen={createTaskModal.isOpen}
         defaultProjectId={createTaskModal.projectId}
         defaultStartDate={createTaskModal.startDate}
+        defaultUnassigned={createTaskModal.unassigned}
         onClose={() => setCreateTaskModal({ isOpen: false })}
       />
       <TaskDetailModal taskId={detailTaskId} onClose={() => setDetailTaskId(null)} />

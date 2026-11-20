@@ -12,6 +12,7 @@ interface CreateTaskModalProps {
   onClose: () => void;
   defaultProjectId?: string;
   defaultStartDate?: string;
+  defaultUnassigned?: boolean;
 }
 
 export function CreateTaskModal({
@@ -19,6 +20,7 @@ export function CreateTaskModal({
   onClose,
   defaultProjectId,
   defaultStartDate,
+  defaultUnassigned = false,
 }: CreateTaskModalProps) {
   const { currentUser } = useAuth();
   const { visibleProjects, users, createTask } = useWorkspace();
@@ -43,7 +45,7 @@ export function CreateTaskModal({
     setStartDate(baseStart);
     setDueDate(addDays(baseStart, 4));
     setFormError(null);
-  }, [isOpen, defaultProjectId, defaultStartDate]);
+  }, [isOpen, defaultProjectId, defaultStartDate, defaultUnassigned]);
 
   const effectiveProjectId =
     projectId && visibleProjects.some((p) => p.id === projectId)
@@ -65,7 +67,9 @@ export function CreateTaskModal({
       ? currentUser.id
       : assignableMembers.some((u) => u.id === assigneeId)
         ? assigneeId
-        : assignableMembers[0]?.id ?? '';
+        : defaultUnassigned
+          ? ''
+          : assignableMembers[0]?.id ?? '';
 
   if (!currentUser) return null;
 
@@ -152,6 +156,10 @@ export function CreateTaskModal({
           />
         </div>
 
+        <p className="rounded-xl border border-indigo-100 bg-indigo-50/60 px-3 py-2 text-[11px] leading-relaxed text-indigo-800">
+          เมื่อสร้างงาน ระบบจะสร้าง Milestone ชื่อเดียวกันและวางไว้ใน “ยังไม่จัด Phase” เพื่อให้ย้ายไป Phase ที่ต้องการได้ทันที
+        </p>
+
         <div>
           <label htmlFor="create-task-desc" className="mb-1 block font-semibold text-slate-700">
             รายละเอียดงาน
@@ -169,7 +177,7 @@ export function CreateTaskModal({
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
             <label htmlFor="create-task-assignee" className="mb-1 block font-semibold text-slate-700">
-              ผู้รับผิดชอบ *
+              {defaultUnassigned ? 'ผู้รับผิดชอบ' : 'ผู้รับผิดชอบ *'}
             </label>
             <select
               id="create-task-assignee"
@@ -178,12 +186,20 @@ export function CreateTaskModal({
               onChange={(e) => setAssigneeId(e.target.value)}
               className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 font-medium text-slate-800 disabled:cursor-not-allowed disabled:bg-slate-100"
             >
+              {defaultUnassigned && currentUser.role !== 'staff' && (
+                <option value="">ยังไม่มอบหมาย</option>
+              )}
               {assignableMembers.map((u) => (
                 <option key={u.id} value={u.id}>
                   {u.name}
                 </option>
               ))}
             </select>
+            {defaultUnassigned && (
+              <p className="mt-1 text-[10px] text-slate-400">
+                งานจะถูกสร้างไว้ในคอลัมน์ “ยังไม่มอบหมาย”
+              </p>
+            )}
             {currentUser.role === 'staff' && (
               <p className="mt-1 text-[10px] text-slate-400">
                 เจ้าหน้าที่สามารถสร้างงานให้ตนเองเท่านั้น

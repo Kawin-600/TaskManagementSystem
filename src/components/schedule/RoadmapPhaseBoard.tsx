@@ -13,7 +13,7 @@ import type { RoadmapViewProps } from './RoadmapBoard';
 import { MILESTONE_STATUS_STYLES } from './roadmapStyles';
 
 type RoadmapPhaseBoardProps = Omit<RoadmapViewProps, 'yearMonth'> & {
-  onMovePhase: (milestone: Milestone, phase: number) => void;
+  onMovePhase: (milestone: Milestone, phase: number | null) => void;
   onAddInPhase: (projectId: string, phase: number) => void;
 };
 
@@ -39,6 +39,7 @@ export function RoadmapPhaseBoard({
           return {
             project,
             projectMilestones,
+            unassignedMilestones: projectMilestones.filter((m) => m.phase === null),
             phases: groupMilestonesByPhase(projectMilestones),
             phaseCount: getPhaseCount(projectMilestones),
           };
@@ -47,7 +48,11 @@ export function RoadmapPhaseBoard({
     [projects, milestones],
   );
 
-  const handleDrop = (e: DragEvent<HTMLDivElement>, projectId: string, phase: number) => {
+  const handleDrop = (
+    e: DragEvent<HTMLDivElement>,
+    projectId: string,
+    phase: number | null,
+  ) => {
     e.preventDefault();
     setDragOverKey(null);
     const id = draggedId || e.dataTransfer?.getData('text/plain');
@@ -58,11 +63,64 @@ export function RoadmapPhaseBoard({
     onMovePhase(milestone, phase);
   };
 
+  const renderMilestoneCard = (m: Milestone, manageable: boolean) => {
+    const status = getMilestoneStatus(m, todayStr);
+    const styles = MILESTONE_STATUS_STYLES[status];
+    return (
+      <div
+        key={m.id}
+        data-testid={`phase-card-${m.id}`}
+        data-phase={m.phase ?? ''}
+        draggable={manageable}
+        onDragStart={(e) => {
+          if (!manageable) {
+            e.preventDefault();
+            return;
+          }
+          setDraggedId(m.id);
+          e.dataTransfer?.setData('text/plain', m.id);
+        }}
+        onDragEnd={() => {
+          setDraggedId(null);
+          setDragOverKey(null);
+        }}
+        onClick={() => manageable && onMilestoneClick(m)}
+        className={`rounded-xl border border-slate-200 bg-white p-3 text-xs shadow-sm transition ${
+          manageable
+            ? 'cursor-grab hover:border-indigo-300 hover:shadow active:cursor-grabbing'
+            : ''
+        } ${draggedId === m.id ? 'opacity-50' : ''}`}
+      >
+        <div className="flex items-start justify-between gap-2">
+          <p className="font-bold leading-snug text-slate-800">{m.title}</p>
+          <span
+            className={`shrink-0 whitespace-nowrap rounded-full border px-2 py-0.5 text-[10px] font-bold ${styles.badge}`}
+          >
+            {MILESTONE_STATUS_LABELS[status]}
+          </span>
+        </div>
+        <p className="mt-2 flex items-center gap-1 text-[11px] text-slate-500">
+          <CalendarIcon className="h-3 w-3" />
+          {formatThaiDateShort(m.startDate)} – {formatThaiDateShort(m.endDate)}
+        </p>
+        <div className="mt-2 flex items-center gap-2">
+          <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-slate-100">
+            <div className={`h-full rounded-full ${styles.dot}`} style={{ width: `${m.progress}%` }} />
+          </div>
+          <span className="w-9 text-right font-bold text-slate-700">{m.progress}%</span>
+        </div>
+        <p className="mt-2 border-t border-slate-100 pt-2 text-[11px] text-slate-500">
+          ผู้ดูแล: {userNames.get(m.ownerId) ?? '-'}
+        </p>
+      </div>
+    );
+  };
+
   return (
     <div className="space-y-6 p-4">
-      {sections.map(({ project, projectMilestones, phases, phaseCount }) => {
+      {sections.map(({ project, projectMilestones, unassignedMilestones, phases, phaseCount }) => {
         const manageable = canManageProject(project.id);
-        const dropProps = (phase: number, key: string) =>
+        const dropProps = (phase: number | null, key: string) =>
           manageable
             ? {
                 onDragOver: (e: DragEvent<HTMLDivElement>) => {
@@ -88,6 +146,28 @@ export function RoadmapPhaseBoard({
             </div>
 
             <div className="flex items-stretch gap-4 overflow-x-auto pb-2">
+              {(manageable || unassignedMilestones.length > 0) && (
+                <div
+                  data-testid={`phase-col-${project.id}-unassigned`}
+                  {...dropProps(null, `${project.id}-unassigned`)}
+                  className={`flex w-72 shrink-0 flex-col rounded-2xl border p-3 transition ${
+                    dragOverKey === `${project.id}-unassigned`
+                      ? 'border-indigo-400 bg-indigo-50'
+                      : 'border-dashed border-slate-300 bg-slate-50'
+                  }`}
+                >
+                  <div className="mb-3 flex items-center justify-between border-b border-slate-200 pb-2">
+                    <span className="text-sm font-bold text-slate-700">ยังไม่จัด Phase</span>
+                    <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-bold text-slate-600">
+                      {unassignedMilestones.length}
+                    </span>
+                  </div>
+                  <div className="flex flex-1 flex-col gap-2.5">
+                    {unassignedMilestones.map((m) => renderMilestoneCard(m, manageable))}
+                  </div>
+                </div>
+              )}
+
               {phases.map(({ phase, milestones: phaseMilestones }) => {
                 const key = `${project.id}-${phase}`;
                 return (
@@ -121,63 +201,7 @@ export function RoadmapPhaseBoard({
                     </div>
 
                     <div className="flex flex-1 flex-col gap-2.5">
-                      {phaseMilestones.map((m) => {
-                        const status = getMilestoneStatus(m, todayStr);
-                        const styles = MILESTONE_STATUS_STYLES[status];
-                        return (
-                          <div
-                            key={m.id}
-                            data-testid={`phase-card-${m.id}`}
-                            data-phase={m.phase}
-                            draggable={manageable}
-                            onDragStart={(e) => {
-                              if (!manageable) {
-                                e.preventDefault();
-                                return;
-                              }
-                              setDraggedId(m.id);
-                              e.dataTransfer?.setData('text/plain', m.id);
-                            }}
-                            onDragEnd={() => {
-                              setDraggedId(null);
-                              setDragOverKey(null);
-                            }}
-                            onClick={() => manageable && onMilestoneClick(m)}
-                            className={`rounded-xl border border-slate-200 bg-white p-3 text-xs shadow-sm transition ${
-                              manageable
-                                ? 'cursor-grab hover:border-indigo-300 hover:shadow active:cursor-grabbing'
-                                : ''
-                            } ${draggedId === m.id ? 'opacity-50' : ''}`}
-                          >
-                            <div className="flex items-start justify-between gap-2">
-                              <p className="font-bold leading-snug text-slate-800">{m.title}</p>
-                              <span
-                                className={`shrink-0 whitespace-nowrap rounded-full border px-2 py-0.5 text-[10px] font-bold ${styles.badge}`}
-                              >
-                                {MILESTONE_STATUS_LABELS[status]}
-                              </span>
-                            </div>
-                            <p className="mt-2 flex items-center gap-1 text-[11px] text-slate-500">
-                              <CalendarIcon className="h-3 w-3" />
-                              {formatThaiDateShort(m.startDate)} – {formatThaiDateShort(m.endDate)}
-                            </p>
-                            <div className="mt-2 flex items-center gap-2">
-                              <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-slate-100">
-                                <div
-                                  className={`h-full rounded-full ${styles.dot}`}
-                                  style={{ width: `${m.progress}%` }}
-                                />
-                              </div>
-                              <span className="w-9 text-right font-bold text-slate-700">
-                                {m.progress}%
-                              </span>
-                            </div>
-                            <p className="mt-2 border-t border-slate-100 pt-2 text-[11px] text-slate-500">
-                              ผู้ดูแล: {userNames.get(m.ownerId) ?? '-'}
-                            </p>
-                          </div>
-                        );
-                      })}
+                      {phaseMilestones.map((m) => renderMilestoneCard(m, manageable))}
                     </div>
                   </div>
                 );

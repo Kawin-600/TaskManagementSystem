@@ -9,6 +9,7 @@ import {
 } from 'react';
 import {
   canManageMilestones,
+  canManageUsers,
   getVisibleMilestones,
   canAccessAdmin,
   canApproveOrRejectTask,
@@ -406,12 +407,14 @@ export function WorkspaceProvider({
 
   const createUser = useCallback(
     async (input: CreateUserInput): Promise<User | null> => {
-      if (!currentUser || !canAccessAdmin(currentUser)) {
-        showToast('เฉพาะ Admin เท่านั้นที่เพิ่มผู้ใช้งานได้', 'error');
+      if (!currentUser || !canManageUsers(currentUser)) {
+        showToast('คุณไม่มีสิทธิ์เพิ่มผู้ใช้งาน', 'error');
         return null;
       }
       try {
-        const created = await repository.createUser(input);
+        const safeInput: CreateUserInput =
+          currentUser.role === 'executive' ? { ...input, role: 'staff' } : input;
+        const created = await repository.createUser(safeInput);
         await reload();
         showToast('เพิ่มผู้ใช้งานใหม่เรียบร้อยแล้ว', 'success');
         return created;

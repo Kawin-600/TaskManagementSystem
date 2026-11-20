@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import { X } from 'lucide-react';
-import { canAccessAdmin } from '../../domain/rbac';
+import { canManageUsers } from '../../domain/rbac';
 import { useAuth } from '../../state/AuthContext';
 import { IconRail } from './IconRail';
 import { ContextualSubPanel } from './ContextualSubPanel';
@@ -25,7 +25,7 @@ export function AppShell({
 
   const subPanelMode: 'projects' | 'admin' | null = location.pathname.startsWith('/projects')
     ? 'projects'
-    : location.pathname.startsWith('/admin') && currentUser && canAccessAdmin(currentUser)
+    : location.pathname.startsWith('/admin') && currentUser && canManageUsers(currentUser)
       ? 'admin'
       : null;
 

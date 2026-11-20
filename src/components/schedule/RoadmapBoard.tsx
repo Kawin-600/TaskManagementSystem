@@ -96,7 +96,7 @@ export function RoadmapBoard({
                   const status = getMilestoneStatus(m, todayStr);
                   const styles = MILESTONE_STATUS_STYLES[status];
                   const bar = getMilestoneBar(m, weeks);
-                  const phaseLabel = `Phase ${m.phase}`;
+                  const phaseLabel = m.phase === null ? 'ยังไม่จัด Phase' : `Phase ${m.phase}`;
                   const barLabel = `${phaseLabel} ${m.title} — ${MILESTONE_STATUS_LABELS[status]} ${m.progress}%`;
                   const barClass = `absolute top-1/2 flex h-7 min-w-[44px] -translate-y-1/2 items-center justify-between gap-2 overflow-hidden rounded-lg border px-2 text-[10px] font-bold ${styles.track} ${styles.text}`;
                   const barStyle = bar

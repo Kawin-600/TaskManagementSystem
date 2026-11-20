@@ -57,7 +57,7 @@ export function MilestoneFormModal({
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [progress, setProgress] = useState(0);
-  const [phase, setPhase] = useState(1);
+  const [phase, setPhase] = useState<number | null>(1);
   const [formError, setFormError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
@@ -99,7 +99,7 @@ export function MilestoneFormModal({
 
   const existingPhaseCount = projectId ? phaseCountOf(projectId) : 0;
   const phaseOptions = Array.from(
-    { length: Math.max(existingPhaseCount + 1, phase) },
+    { length: Math.max(existingPhaseCount + 1, phase ?? 1) },
     (_unused, index) => index + 1,
   );
 
@@ -154,7 +154,7 @@ export function MilestoneFormModal({
 
   const handleDelete = async () => {
     if (!milestone) return;
-    if (!window.confirm('ยืนยันการลบ Milestone นี้?')) return;
+    if (!window.confirm('ยืนยันลบ Milestone นี้และ Task ที่เชื่อมอยู่ทั้งหมดหรือไม่?')) return;
     const ok = await deleteMilestone(milestone.id);
     if (ok) onClose();
   };
@@ -217,14 +217,15 @@ export function MilestoneFormModal({
 
         <div>
           <label htmlFor="ms-phase" className="mb-1 block font-semibold text-slate-700">
-            Phase *
+            Phase
           </label>
           <select
             id="ms-phase"
-            value={phase}
-            onChange={(e) => setPhase(Number(e.target.value))}
+            value={phase ?? ''}
+            onChange={(e) => setPhase(e.target.value ? Number(e.target.value) : null)}
             className={FIELD_CLASS}
           >
+            <option value="">ยังไม่จัด Phase</option>
             {phaseOptions.map((n) => (
               <option key={n} value={n}>
                 {n > existingPhaseCount ? `Phase ${n} (เปิดใหม่)` : `Phase ${n}`}

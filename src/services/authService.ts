@@ -68,7 +68,24 @@ export class LocalAuthService implements AuthService {
       throw new Error('โหมดทดลองเข้าใช้งานถูกปิดอยู่');
     }
     const { users } = await this.repository.loadAll();
-    const match = users.find((u) => u.id === userId);
+    let match = users.find((u) => u.id === userId);
+    if (!match && userId === 'demo-executive') {
+      match = users.find((u) => u.role === 'executive');
+      if (!match) {
+        let email = 'executive@taskflow.local';
+        let suffix = 1;
+        while (users.some((user) => user.email.toLowerCase() === email)) {
+          email = `executive${suffix}@taskflow.local`;
+          suffix += 1;
+        }
+        match = await this.repository.createUser({
+          name: 'ผู้บริหารตัวอย่าง',
+          email,
+          role: 'executive',
+          password: '1234',
+        });
+      }
+    }
     if (!match) {
       throw new Error('ไม่พบบัญชีตัวอย่างที่เลือก');
     }

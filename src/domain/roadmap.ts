@@ -41,7 +41,7 @@ function sortByStartDate<T extends Pick<Milestone, 'id' | 'startDate' | 'created
 export function sortMilestones(milestones: Milestone[]): Milestone[] {
   return [...milestones].sort(
     (a, b) =>
-      a.phase - b.phase ||
+      (a.phase === null ? (b.phase === null ? 0 : -1) : b.phase === null ? 1 : a.phase - b.phase) ||
       a.startDate.localeCompare(b.startDate) ||
       a.createdAt.localeCompare(b.createdAt) ||
       a.id.localeCompare(b.id),
@@ -184,6 +184,7 @@ export function groupMilestonesByProject<P extends { id: string }>(
 export function compactPhases(milestones: Milestone[]): Milestone[] {
   const phasesByProject = new Map<string, Set<number>>();
   for (const m of milestones) {
+    if (m.phase === null) continue;
     const set = phasesByProject.get(m.projectId) ?? new Set<number>();
     set.add(m.phase);
     phasesByProject.set(m.projectId, set);
@@ -194,6 +195,7 @@ export function compactPhases(milestones: Milestone[]): Milestone[] {
     remap.set(projectId, new Map(ordered.map((phase, index) => [phase, index + 1])));
   }
   return milestones.map((m) => {
+    if (m.phase === null) return m;
     const next = remap.get(m.projectId)?.get(m.phase) ?? m.phase;
     return next === m.phase ? m : { ...m, phase: next };
   });
@@ -201,7 +203,7 @@ export function compactPhases(milestones: Milestone[]): Milestone[] {
 
 /** Highest phase used by a project's milestones (0 when it has none). */
 export function getPhaseCount(milestones: Milestone[]): number {
-  return milestones.reduce((max, m) => Math.max(max, m.phase), 0);
+  return milestones.reduce((max, m) => Math.max(max, m.phase ?? 0), 0);
 }
 
 /** One entry per phase from 1 to the highest phase, for a single project's milestones. */

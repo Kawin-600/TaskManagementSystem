@@ -72,7 +72,7 @@ export function RoadmapList({
                     className="border-b border-slate-100"
                   >
                     <td className="whitespace-nowrap px-4 py-2.5 font-bold text-slate-600">
-                      Phase {m.phase}
+                      {m.phase === null ? 'ยังไม่จัด Phase' : `Phase ${m.phase}`}
                     </td>
                     <td className="px-3 py-2.5 font-semibold text-slate-800">{m.title}</td>
                     <td className="whitespace-nowrap px-3 py-2.5 text-slate-600">

@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { AlertCircle } from 'lucide-react';
 import { useWorkspace } from '../../state/WorkspaceContext';
+import { useAuth } from '../../state/AuthContext';
 import type { UserRole } from '../../types/models';
 import { Modal } from '../ui/Modal';
 
@@ -13,6 +14,8 @@ const SIMPLE_EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export function CreateUserModal({ isOpen, onClose }: CreateUserModalProps) {
   const { createUser } = useWorkspace();
+  const { currentUser } = useAuth();
+  const canChooseRole = currentUser?.role === 'admin';
 
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -43,7 +46,7 @@ export function CreateUserModal({ isOpen, onClose }: CreateUserModalProps) {
     const created = await createUser({
       name: name.trim(),
       email: email.trim(),
-      role,
+      role: canChooseRole ? role : 'staff',
       password: password.trim() || '1234',
     });
     if (created) {
@@ -101,18 +104,25 @@ export function CreateUserModal({ isOpen, onClose }: CreateUserModalProps) {
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
             <label htmlFor="user-role" className="mb-1 block font-semibold text-slate-700">
-              บทบาทสิทธิ์ใช้งาน *
+              บทบาทสิทธิ์ใช้งาน
             </label>
-            <select
-              id="user-role"
-              value={role}
-              onChange={(e) => setRole(e.target.value as UserRole)}
-              className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 font-medium text-slate-800"
-            >
-              <option value="staff">เจ้าหน้าที่ (Staff)</option>
-              <option value="supervisor">หัวหน้างาน (Supervisor)</option>
-              <option value="admin">Admin (ผู้ดูแลระบบ)</option>
-            </select>
+            {canChooseRole ? (
+              <select
+                id="user-role"
+                value={role}
+                onChange={(e) => setRole(e.target.value as UserRole)}
+                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 font-medium text-slate-800"
+              >
+                <option value="staff">เจ้าหน้าที่ (Staff)</option>
+                <option value="supervisor">หัวหน้างาน (Supervisor)</option>
+                <option value="executive">ผู้บริหาร (Executive)</option>
+                <option value="admin">Admin (ผู้ดูแลระบบ)</option>
+              </select>
+            ) : (
+              <div className="rounded-xl border border-slate-200 bg-slate-100 px-3 py-2 font-medium text-slate-600">
+                เจ้าหน้าที่ (Staff)
+              </div>
+            )}
           </div>
 
           <div>

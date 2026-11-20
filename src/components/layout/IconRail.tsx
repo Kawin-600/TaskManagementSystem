@@ -10,7 +10,7 @@ import {
   ShieldCheck,
   LogOut,
 } from 'lucide-react';
-import { canAccessAdmin } from '../../domain/rbac';
+import { canAccessAdmin, canManageUsers } from '../../domain/rbac';
 import { useAuth } from '../../state/AuthContext';
 import { useWorkspace } from '../../state/WorkspaceContext';
 import { AvatarCircle, RoleBadge } from '../ui/Badges';
@@ -73,10 +73,10 @@ export function IconRail({ onNavigate }: IconRailProps) {
     },
   ];
 
-  if (canAccessAdmin(currentUser)) {
+  if (canManageUsers(currentUser)) {
     navItems.push({
       to: '/admin/users',
-      label: 'จัดการระบบ',
+      label: canAccessAdmin(currentUser) ? 'จัดการระบบ' : 'จัดการผู้ใช้',
       Icon: ShieldCheck,
       match: (p: string) => p.startsWith('/admin'),
     });

@@ -1,7 +1,7 @@
 import type { Milestone, Project, Task, TaskStatus, User } from '../types/models';
 
 export function canViewProject(user: User, project: Project): boolean {
-  if (user.role === 'admin') return true;
+  if (user.role === 'admin' || user.role === 'executive') return true;
   if (user.role === 'supervisor') {
     return project.supervisorId === user.id || project.memberIds.includes(user.id);
   }
@@ -13,11 +13,11 @@ export function getVisibleProjects(user: User, projects: Project[]): Project[] {
 }
 
 export function canCreateProject(user: User): boolean {
-  return user.role === 'admin' || user.role === 'supervisor';
+  return user.role === 'admin' || user.role === 'supervisor' || user.role === 'executive';
 }
 
 export function canManageProject(user: User, project: Project): boolean {
-  if (user.role === 'admin') return true;
+  if (user.role === 'admin' || user.role === 'executive') return true;
   if (user.role === 'supervisor') return project.supervisorId === user.id;
   return false;
 }
@@ -43,7 +43,7 @@ export function getAssignableMembers(user: User, project: Project, allUsers: Use
 
 export function canEditTask(user: User, task: Task, project?: Project): boolean {
   if (project && !canViewProject(user, project)) return false;
-  if (user.role === 'admin' || user.role === 'supervisor') return true;
+  if (user.role === 'admin' || user.role === 'supervisor' || user.role === 'executive') return true;
   if (task.status === 'completed') return false;
   return task.assigneeId === user.id;
 }
@@ -59,6 +59,16 @@ export function validateTaskStatusTransition(
   }
 
   if (user.role === 'admin' || user.role === 'supervisor') {
+    return { allowed: true };
+  }
+
+  if (user.role === 'executive') {
+    if (newStatus === 'completed' || task.status === 'completed') {
+      return { allowed: false, reason: 'ผู้บริหารไม่มีสิทธิ์อนุมัติหรือเปิดงานที่เสร็จสิ้นแล้ว' };
+    }
+    if (task.status === 'review' && newStatus !== 'review') {
+      return { allowed: false, reason: 'ผู้บริหารไม่มีสิทธิ์ตรวจหรือส่งงานกลับจากสถานะรอตรวจสอบ' };
+    }
     return { allowed: true };
   }
 
@@ -94,7 +104,7 @@ export function canApproveOrRejectTask(user: User, task: Task, project?: Project
 
 export function canDeleteTask(user: User, _task: Task, project?: Project): boolean {
   if (project && !canViewProject(user, project)) return false;
-  return user.role === 'admin' || user.role === 'supervisor';
+  return user.role === 'admin' || user.role === 'supervisor' || user.role === 'executive';
 }
 
 export function canCommentOnTask(user: User, _task: Task, project?: Project): boolean {
@@ -103,7 +113,7 @@ export function canCommentOnTask(user: User, _task: Task, project?: Project): bo
 }
 
 export function getVisibleTeamUsers(user: User, projects: Project[], allUsers: User[]): User[] {
-  if (user.role === 'admin') return allUsers;
+  if (user.role === 'admin' || user.role === 'executive') return allUsers;
   const visibleProjects = getVisibleProjects(user, projects);
   const visibleUserIds = new Set<string>();
   for (const project of visibleProjects) {
@@ -119,12 +129,16 @@ export function canAccessAdmin(user: User): boolean {
   return user.role === 'admin';
 }
 
+export function canManageUsers(user: User): boolean {
+  return user.role === 'admin' || user.role === 'executive';
+}
+
 export function canModifyUserRole(actingUser: User, targetUserId: string): boolean {
   return actingUser.role === 'admin' && actingUser.id !== targetUserId;
 }
 
 export function canDeleteUser(actingUser: User, targetUserId: string): boolean {
-  return actingUser.role === 'admin' && actingUser.id !== targetUserId;
+  return canManageUsers(actingUser) && actingUser.id !== targetUserId;
 }
 
 export function getVisibleMilestones(

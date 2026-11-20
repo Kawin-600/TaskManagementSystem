@@ -30,11 +30,16 @@ import {
 } from '../components/schedule/TimelineGantt';
 import { KanbanBoard } from '../components/workspace/KanbanBoard';
 import { TaskListTable } from '../components/workspace/TaskListTable';
+import { AssignTasksBoard } from '../components/workspace/AssignTasksBoard';
 
-type WorkspaceTab = 'kanban' | 'list' | 'timeline' | 'calendar';
+type WorkspaceTab = 'kanban' | 'list' | 'timeline' | 'calendar' | 'assign';
 
 interface ProjectWorkspacePageProps {
-  onOpenCreateTask: (opts?: { projectId?: string; startDate?: string }) => void;
+  onOpenCreateTask: (opts?: {
+    projectId?: string;
+    startDate?: string;
+    unassigned?: boolean;
+  }) => void;
   onOpenTaskDetail: (taskId: string) => void;
   onOpenEditProject: (project: Project) => void;
   onOpenMembers: (projectId: string) => void;
@@ -74,6 +79,13 @@ export function ProjectWorkspacePage({
     { id: 'timeline', label: 'ไทม์ไลน์ (Timeline)', Icon: GanttChart },
     { id: 'calendar', label: 'ปฏิทิน (Calendar)', Icon: CalendarIcon },
   ];
+  const canAssignTasks =
+    currentUser.role === 'admin' ||
+    currentUser.role === 'supervisor' ||
+    currentUser.role === 'executive';
+  if (canAssignTasks) {
+    tabs.push({ id: 'assign', label: 'มอบหมายงาน (Assign)', Icon: Users });
+  }
 
   return (
     <div className="space-y-5">
@@ -129,7 +141,9 @@ export function ProjectWorkspacePage({
             {canAddTask && (
               <button
                 type="button"
-                onClick={() => onOpenCreateTask({ projectId: project.id })}
+                onClick={() =>
+                  onOpenCreateTask({ projectId: project.id, unassigned: activeTab === 'assign' })
+                }
                 className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-3.5 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-indigo-700"
               >
                 <Plus className="h-3.5 w-3.5" />
@@ -224,6 +238,13 @@ export function ProjectWorkspacePage({
           onAddTaskOnDate={(dateStr) =>
             onOpenCreateTask({ projectId: project.id, startDate: dateStr })
           }
+        />
+      )}
+      {activeTab === 'assign' && canAssignTasks && (
+        <AssignTasksBoard
+          project={project}
+          tasks={projectTasks}
+          onTaskClick={onOpenTaskDetail}
         />
       )}
     </div>

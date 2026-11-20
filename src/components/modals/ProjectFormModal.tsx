@@ -18,7 +18,9 @@ export function ProjectFormModal({ isOpen, onClose, project, onSaved }: ProjectF
   const { currentUser } = useAuth();
   const { users, createProject, updateProject } = useWorkspace();
 
-  const eligibleSupervisors = users.filter((u) => u.role === 'admin' || u.role === 'supervisor');
+  const eligibleSupervisors = users.filter(
+    (u) => u.role === 'admin' || u.role === 'supervisor' || u.role === 'executive',
+  );
 
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
@@ -38,7 +40,7 @@ export function ProjectFormModal({ isOpen, onClose, project, onSaved }: ProjectF
       setMemberIds(Array.from(new Set([project.supervisorId, ...project.memberIds])));
     } else {
       const defaultSup =
-        currentUser.role === 'supervisor' || currentUser.role === 'admin'
+        currentUser.role === 'supervisor' || currentUser.role === 'admin' || currentUser.role === 'executive'
           ? currentUser.id
           : eligibleSupervisors[0]?.id ?? '';
       setName('');
@@ -53,7 +55,7 @@ export function ProjectFormModal({ isOpen, onClose, project, onSaved }: ProjectF
 
   const fallbackSupervisorId =
     project?.supervisorId ??
-    (currentUser.role === 'supervisor' || currentUser.role === 'admin'
+    (currentUser.role === 'supervisor' || currentUser.role === 'admin' || currentUser.role === 'executive'
       ? currentUser.id
       : eligibleSupervisors[0]?.id ?? '');
   const effectiveSupervisorId = supervisorId || fallbackSupervisorId;
