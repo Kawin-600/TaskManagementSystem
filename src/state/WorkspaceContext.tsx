@@ -45,8 +45,13 @@ import type {
 import { getThaiRoleName, getThaiStatusName } from '../components/ui/Badges';
 import type { TaskNotificationEvent } from '../domain/taskNotifications';
 import { formatDateObj, formatThaiDateShort } from '../domain/dates';
-import { readTelegramReminder, telegramHeaders } from '../services/telegramSettings';
-import { selectDueReminders } from '../domain/telegramReminder';
+import { readTelegramPreferences, requestTelegramSettings, telegramHeaders } from '../services/telegramSettings';
+import {
+  buildTelegramDigest,
+  getTelegramDigestKind,
+  selectTelegramDigestTasks,
+  telegramPriorityLabels,
+} from '../domain/telegramDigest';
 import { useAuth } from './AuthContext';
 import { useToast } from './ToastContext';
 
@@ -104,17 +109,26 @@ export function WorkspaceProvider({
 
   const notifyTask = useCallback(async (task: Task, ...events: TaskNotificationEvent[]) => {
     if (!events.length) return false;
-    const reminder = events.includes('dueReminder');
     try {
+      const preferences = readTelegramPreferences(task.assigneeId);
+      const telegramEvents = preferences.priorities.includes(task.priority) ? events.filter((event) =>
+        preferences.topics.includes(
+          event === 'created' || event === 'assigned' || event === 'dueDateChanged' || event === 'priorityChanged'
+            ? event
+            : 'statusChanged',
+        ),
+      ) : [];
       const response = await fetch('/api/task-notifications', {
         method: 'POST',
         headers: telegramHeaders(),
         body: JSON.stringify({
           events,
+          telegramEvents,
           assigneeId: task.assigneeId,
           task: {
             title: task.title.slice(0, 180),
             assignee: users.find((user) => user.id === task.assigneeId)?.name.slice(0, 180),
+          priority: telegramPriorityLabels[task.priority],
             dueDate: task.dueDate ? formatThaiDateShort(task.dueDate) : undefined,
           },
         }),
@@ -125,11 +139,9 @@ export function WorkspaceProvider({
       if (!response.ok) throw new Error('Task notification request failed');
       const result = await response.json();
       const failed = [result.telegram === 'failed' && 'Telegram', result.line === 'failed' && 'LINE'].filter(Boolean);
-      if (!reminder && failed.length) showToast(`บันทึกงานแล้ว แต่ส่งแจ้งเตือนผ่าน ${failed.join(' และ ')} ไม่สำเร็จ`, 'warning');
-      return result.telegram === 'accepted';
+      if (failed.length) showToast(`บันทึกงานแล้ว แต่ส่งแจ้งเตือนผ่าน ${failed.join(' และ ')} ไม่สำเร็จ`, 'warning');
     } catch {
-      if (!reminder) showToast('บันทึกงานแล้ว แต่ระบบแจ้งเตือนติดต่อไม่ได้', 'warning');
-      return false;
+      showToast('บันทึกงานแล้ว แต่ระบบแจ้งเตือนติดต่อไม่ได้', 'warning');
     }
   }, [showToast, users]);
 
@@ -177,7 +189,7 @@ export function WorkspaceProvider({
   useEffect(() => {
     if (!currentUser || isLoading) return;
     const userId = currentUser.id;
-    const historyKey = `taskflow.telegramReminderSent.${userId}`;
+    const lockKey = `taskflow.telegramDigest.${userId}`;
     let active = true;
     let checking = false;
 
@@ -185,23 +197,21 @@ export function WorkspaceProvider({
       if (!active || checking) return;
       checking = true;
       try {
-        const sendDueReminders = async () => {
+        const sendDigest = async () => {
           if (!active) return;
           const now = new Date();
           const today = formatDateObj(now);
-          const eligible = selectDueReminders(visibleTasks, userId, readTelegramReminder(userId), now);
-          if (!eligible.length) return;
-          const history = JSON.parse(localStorage.getItem(historyKey) ?? 'null');
-          const sent = new Set<string>(history?.date === today && Array.isArray(history.taskIds) ? history.taskIds : []);
-          for (const task of eligible) {
-            if (!active || !readTelegramReminder(userId).enabled) break;
-            if (sent.has(task.id) || !await notifyTask(task, 'dueReminder')) continue;
-            sent.add(task.id);
-            localStorage.setItem(historyKey, JSON.stringify({ date: today, taskIds: [...sent] }));
-          }
+          const kind = getTelegramDigestKind(now);
+          const preferences = readTelegramPreferences(userId);
+          if (!kind || !preferences.digests.includes(kind) || !preferences.priorities.length) return;
+          const historyKey = `${lockKey}.${kind}`;
+          if (localStorage.getItem(historyKey) === today) return;
+          const eligible = selectTelegramDigestTasks(visibleTasks, userId, preferences.priorities, kind, now);
+          const result = await requestTelegramSettings(userId, 'digest', buildTelegramDigest(kind, eligible, getThaiStatusName));
+          if (result.result === 'accepted') localStorage.setItem(historyKey, today);
         };
-        if (navigator.locks) await navigator.locks.request(historyKey, sendDueReminders);
-        else await sendDueReminders();
+        if (navigator.locks) await navigator.locks.request(lockKey, sendDigest);
+        else await sendDigest();
       } catch {
         // Try again on the next check if browser storage is unavailable.
       } finally {
@@ -212,13 +222,13 @@ export function WorkspaceProvider({
     void check();
     const timer = window.setInterval(() => void check(), 60000);
     const onChange = () => void check();
-    window.addEventListener('taskflow:telegram-reminder', onChange);
+    window.addEventListener('taskflow:telegram-preferences', onChange);
     return () => {
       active = false;
       clearInterval(timer);
-      window.removeEventListener('taskflow:telegram-reminder', onChange);
+      window.removeEventListener('taskflow:telegram-preferences', onChange);
     };
-  }, [currentUser, isLoading, notifyTask, visibleTasks]);
+  }, [currentUser, isLoading, visibleTasks]);
 
   const visibleMilestones = useMemo(
     () => (currentUser ? getVisibleMilestones(currentUser, projects, milestones) : []),
@@ -366,6 +376,7 @@ export function WorkspaceProvider({
         const events: TaskNotificationEvent[] = [];
         if (updated.assigneeId !== task.assigneeId) events.push('assigned');
         if (updated.dueDate !== task.dueDate) events.push('dueDateChanged');
+        if (updated.priority !== task.priority) events.push('priorityChanged');
         if (updated.status !== task.status) events.push(updated.status);
         notifyTask(updated, ...events);
         return updated;

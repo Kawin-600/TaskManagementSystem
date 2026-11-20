@@ -3,6 +3,7 @@ import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { taskNotificationMessages, type TaskNotificationEvent } from '../src/domain/taskNotifications';
+import { telegramDigestLabels, telegramDigestLimit } from '../src/domain/telegramDigest';
 
 export function taskNotifications(env: Record<string, string>): Plugin {
   const { TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, TELEGRAM_CHAT_IDS, LINE_CHANNEL_ACCESS_TOKEN, LINE_RECIPIENT_ID } = env;
@@ -57,6 +58,7 @@ export function taskNotifications(env: Record<string, string>): Plugin {
     let payload: {
       events?: unknown; test?: unknown; task?: unknown; assigneeId?: unknown;
       userId?: unknown; action?: unknown; token?: unknown; chatId?: unknown;
+      telegramEvents?: unknown; kind?: unknown; items?: unknown; total?: unknown; simulated?: unknown;
     } | null;
     try {
       const chunks: Buffer[] = [];
@@ -93,6 +95,27 @@ export function taskNotifications(env: Record<string, string>): Plugin {
             return reply(200, { result: 'failed' });
           }
         }
+        if (payload?.action === 'digest') {
+          if (!account) return reply(409);
+          const { kind, items, total } = payload;
+          if ((kind !== 'pending' && kind !== 'newTasks') || !Array.isArray(items) ||
+              items.length > telegramDigestLimit || typeof total !== 'number' ||
+              !Number.isSafeInteger(total) || total < items.length) return reply(400);
+          const clean = (value: unknown, limit: number) =>
+            typeof value === 'string' ? value.replace(/\s+/g, ' ').trim().slice(0, limit) : '';
+          const lines = items.map((item, index) => {
+            const title = clean(item?.title, 95) || 'ไม่ระบุชื่องาน';
+            const details = [clean(item?.priority, 20), clean(item?.status, 25), clean(item?.dueDate, 25)].filter(Boolean);
+            return `${index + 1}. ${title}${details.length ? ` · ${details.join(' · ')}` : ''}`;
+          });
+          const message = [
+            `TaskFlow Pro · ${payload.simulated === true ? 'จำลองรอบ ' : ''}${telegramDigestLabels[kind]}`,
+            `ทั้งหมด ${total} งาน`,
+            ...lines,
+            ...(total > items.length ? [`และอีก ${total - items.length} งานในเว็บ`] : []),
+          ].join('\n');
+          return reply(200, { result: await sendTelegram(account, message).catch(() => 'failed') });
+        }
         if (payload?.action === 'clear') {
           await rm(accountPath, { force: true });
           return reply(200, { configured: false });
@@ -114,9 +137,8 @@ export function taskNotifications(env: Record<string, string>): Plugin {
     } catch {
       if (settings) return reply(500);
     }
-    const reminder = Array.isArray(payload?.events) && payload.events.includes('dueReminder');
-    const telegramChatId = test ? TELEGRAM_CHAT_ID : reminder ? undefined : personalChats.get(assigneeId);
-    const sendToLine = !test && !reminder && LINE_CHANNEL_ACCESS_TOKEN && LINE_RECIPIENT_ID;
+    const telegramChatId = test ? TELEGRAM_CHAT_ID : personalChats.get(assigneeId);
+    const sendToLine = !test && LINE_CHANNEL_ACCESS_TOKEN && LINE_RECIPIENT_ID;
     if (!account && TELEGRAM_BOT_TOKEN && telegramChatId) {
       account = { token: TELEGRAM_BOT_TOKEN, chatId: telegramChatId };
     }
@@ -130,18 +152,23 @@ export function taskNotifications(env: Record<string, string>): Plugin {
     }
 
     const events = [...new Set<TaskNotificationEvent>(rawEvents)];
+    const requestedTelegramEvents = payload?.telegramEvents;
+    const telegramEvents = !test && Array.isArray(requestedTelegramEvents)
+      ? events.filter((event) => requestedTelegramEvents.includes(event))
+      : events;
     const task = test ? { title: 'สรุปรายงานประจำเดือน', assignee: 'เมย์ (ตัวอย่าง)', dueDate: '25 พ.ย. 2569' } : payload?.task;
-    const field = (key: 'title' | 'assignee' | 'dueDate', fallback: string) => {
+    const field = (key: 'title' | 'assignee' | 'priority' | 'dueDate', fallback: string) => {
       const value = task && typeof task === 'object' ? (task as Record<string, unknown>)[key] : undefined;
       return typeof value === 'string' ? value.replace(/\s+/g, ' ').trim().slice(0, 180) || fallback : fallback;
     };
-    const message = [
+    const message = (messageEvents: TaskNotificationEvent[]) => [
       test ? 'TaskFlow Pro · ข้อความทดสอบ' : 'TaskFlow Pro',
       '',
-      ...events.map((event) => `📌 ${taskNotificationMessages[event]}`),
+      ...messageEvents.map((event) => `📌 ${taskNotificationMessages[event]}`),
       '',
       `งาน: ${field('title', 'ไม่ระบุ')}`,
       `ผู้รับผิดชอบ: ${field('assignee', 'ยังไม่ได้มอบหมาย')}`,
+      `ความสำคัญ: ${field('priority', 'ไม่ระบุ')}`,
       `กำหนดส่ง: ${field('dueDate', 'ไม่ระบุ')}`,
     ].join('\n');
     const send = async (url: string, body: object, token?: string) => {
@@ -161,13 +188,13 @@ export function taskNotifications(env: Record<string, string>): Plugin {
     };
 
     const [telegram, line] = await Promise.all([
-      account
-        ? sendTelegram(account, message).catch(() => 'failed')
+      account && telegramEvents.length
+        ? sendTelegram(account, message(telegramEvents)).catch(() => 'failed')
         : 'disabled',
       sendToLine
         ? send('https://api.line.me/v2/bot/message/push', {
           to: LINE_RECIPIENT_ID,
-          messages: [{ type: 'text', text: message }],
+          messages: [{ type: 'text', text: message(events) }],
         }, LINE_CHANNEL_ACCESS_TOKEN)
         : 'disabled',
     ]);

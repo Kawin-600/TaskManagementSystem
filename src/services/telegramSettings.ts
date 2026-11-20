@@ -1,4 +1,7 @@
-import { defaultTelegramReminder, type TelegramReminder } from '../domain/telegramReminder';
+import {
+  defaultTelegramPreferences, telegramDigestKinds, telegramPriorities, telegramTopics, type TelegramPreferences,
+  type buildTelegramDigest,
+} from '../domain/telegramDigest';
 
 export function telegramHeaders() {
   const key = 'taskflow.telegramWorkspace';
@@ -12,8 +15,8 @@ export function telegramHeaders() {
 
 export async function requestTelegramSettings(
   userId: string,
-  action: 'status' | 'save' | 'test' | 'clear',
-  fields?: { token: string; chatId: string },
+  action: 'status' | 'save' | 'test' | 'clear' | 'digest',
+  fields?: { token: string; chatId: string } | (ReturnType<typeof buildTelegramDigest> & { simulated?: boolean }),
   signal?: AbortSignal,
 ) {
   const response = await fetch('/api/task-notifications/telegram', {
@@ -22,26 +25,36 @@ export async function requestTelegramSettings(
     body: JSON.stringify({ userId, action, ...fields }),
     signal: signal ?? AbortSignal.timeout(10000),
   });
-  if (response.status === 409 && action === 'test') return { result: 'unconfigured' };
+  if (response.status === 409 && (action === 'test' || action === 'digest')) return { result: 'unconfigured' };
   if (!response.ok) {
     throw new Error(response.status === 400 ? 'ตรวจสอบรูปแบบ Bot Token และ Chat ID ส่วนตัว' : 'ติดต่อระบบตั้งค่า Telegram ไม่สำเร็จ');
   }
   return response.json();
 }
-const reminderKey = (userId: string) => `taskflow.telegramReminder.${userId}`;
+const preferencesKey = (userId: string) => `taskflow.telegramPreferences.${userId}`;
 
-export function readTelegramReminder(userId: string): TelegramReminder {
+export function readTelegramPreferences(userId: string): TelegramPreferences {
   try {
-    const rule = JSON.parse(localStorage.getItem(reminderKey(userId)) ?? 'null');
-    if (typeof rule?.enabled === 'boolean' && /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(rule.time) &&
-        Number.isInteger(rule.daysBefore) && rule.daysBefore >= 0 && rule.daysBefore <= 30) return rule;
+    const value = JSON.parse(localStorage.getItem(preferencesKey(userId)) ?? 'null');
+    if (Array.isArray(value?.digests) && Array.isArray(value.priorities) && Array.isArray(value.topics)) {
+      const legacyTopics = ['created', 'assigned', 'dueDateChanged', 'statusChanged'];
+      const selectedTopics = legacyTopics.every((topic) => value.topics.includes(topic)) &&
+        !value.topics.includes('priorityChanged')
+        ? [...value.topics, 'priorityChanged']
+        : value.topics;
+      return {
+        digests: telegramDigestKinds.filter((kind) => value.digests.includes(kind)),
+        priorities: telegramPriorities.filter((priority) => value.priorities.includes(priority)),
+        topics: telegramTopics.filter((topic) => selectedTopics.includes(topic)),
+      };
+    }
   } catch {
-    return defaultTelegramReminder;
+    return defaultTelegramPreferences;
   }
-  return defaultTelegramReminder;
+  return defaultTelegramPreferences;
 }
 
-export function saveTelegramReminder(userId: string, rule: TelegramReminder) {
-  localStorage.setItem(reminderKey(userId), JSON.stringify(rule));
-  window.dispatchEvent(new Event('taskflow:telegram-reminder'));
+export function saveTelegramPreferences(userId: string, value: TelegramPreferences) {
+  localStorage.setItem(preferencesKey(userId), JSON.stringify(value));
+  window.dispatchEvent(new Event('taskflow:telegram-preferences'));
 }
