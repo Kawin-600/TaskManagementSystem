@@ -43,6 +43,10 @@ import type {
   UserRole,
 } from '../types/models';
 import { getThaiRoleName, getThaiStatusName } from '../components/ui/Badges';
+import type { TaskNotificationEvent } from '../domain/taskNotifications';
+import { formatDateObj, formatThaiDateShort } from '../domain/dates';
+import { readTelegramReminder, telegramHeaders } from '../services/telegramSettings';
+import { selectDueReminders } from '../domain/telegramReminder';
 import { useAuth } from './AuthContext';
 import { useToast } from './ToastContext';
 
@@ -98,6 +102,37 @@ export function WorkspaceProvider({
   const [milestones, setMilestones] = useState<Milestone[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
+  const notifyTask = useCallback(async (task: Task, ...events: TaskNotificationEvent[]) => {
+    if (!events.length) return false;
+    const reminder = events.includes('dueReminder');
+    try {
+      const response = await fetch('/api/task-notifications', {
+        method: 'POST',
+        headers: telegramHeaders(),
+        body: JSON.stringify({
+          events,
+          assigneeId: task.assigneeId,
+          task: {
+            title: task.title.slice(0, 180),
+            assignee: users.find((user) => user.id === task.assigneeId)?.name.slice(0, 180),
+            dueDate: task.dueDate ? formatThaiDateShort(task.dueDate) : undefined,
+          },
+        }),
+        keepalive: true,
+        signal: AbortSignal.timeout(10000),
+      });
+      if (response.status === 204 || response.status === 404) return false;
+      if (!response.ok) throw new Error('Task notification request failed');
+      const result = await response.json();
+      const failed = [result.telegram === 'failed' && 'Telegram', result.line === 'failed' && 'LINE'].filter(Boolean);
+      if (!reminder && failed.length) showToast(`บันทึกงานแล้ว แต่ส่งแจ้งเตือนผ่าน ${failed.join(' และ ')} ไม่สำเร็จ`, 'warning');
+      return result.telegram === 'accepted';
+    } catch {
+      if (!reminder) showToast('บันทึกงานแล้ว แต่ระบบแจ้งเตือนติดต่อไม่ได้', 'warning');
+      return false;
+    }
+  }, [showToast, users]);
+
   const reload = useCallback(async () => {
     const snap = await repository.loadAll();
     setUsers(snap.users);
@@ -138,6 +173,52 @@ export function WorkspaceProvider({
     () => (currentUser ? getVisibleTasks(currentUser, projects, tasks) : []),
     [currentUser, projects, tasks],
   );
+
+  useEffect(() => {
+    if (!currentUser || isLoading) return;
+    const userId = currentUser.id;
+    const historyKey = `taskflow.telegramReminderSent.${userId}`;
+    let active = true;
+    let checking = false;
+
+    async function check() {
+      if (!active || checking) return;
+      checking = true;
+      try {
+        const sendDueReminders = async () => {
+          if (!active) return;
+          const now = new Date();
+          const today = formatDateObj(now);
+          const eligible = selectDueReminders(visibleTasks, userId, readTelegramReminder(userId), now);
+          if (!eligible.length) return;
+          const history = JSON.parse(localStorage.getItem(historyKey) ?? 'null');
+          const sent = new Set<string>(history?.date === today && Array.isArray(history.taskIds) ? history.taskIds : []);
+          for (const task of eligible) {
+            if (!active || !readTelegramReminder(userId).enabled) break;
+            if (sent.has(task.id) || !await notifyTask(task, 'dueReminder')) continue;
+            sent.add(task.id);
+            localStorage.setItem(historyKey, JSON.stringify({ date: today, taskIds: [...sent] }));
+          }
+        };
+        if (navigator.locks) await navigator.locks.request(historyKey, sendDueReminders);
+        else await sendDueReminders();
+      } catch {
+        // Try again on the next check if browser storage is unavailable.
+      } finally {
+        checking = false;
+      }
+    }
+
+    void check();
+    const timer = window.setInterval(() => void check(), 60000);
+    const onChange = () => void check();
+    window.addEventListener('taskflow:telegram-reminder', onChange);
+    return () => {
+      active = false;
+      clearInterval(timer);
+      window.removeEventListener('taskflow:telegram-reminder', onChange);
+    };
+  }, [currentUser, isLoading, notifyTask, visibleTasks]);
 
   const visibleMilestones = useMemo(
     () => (currentUser ? getVisibleMilestones(currentUser, projects, milestones) : []),
@@ -247,13 +328,14 @@ export function WorkspaceProvider({
         const created = await repository.createTask({ ...input, assigneeId });
         await reload();
         showToast('สร้างงานใหม่สำเร็จเรียบร้อยแล้ว', 'success');
+        notifyTask(created, 'created');
         return created;
       } catch (err) {
         showToast(formatRepoError(err, 'สร้างงานไม่สำเร็จ'), 'error');
         return null;
       }
     },
-    [currentUser, projects, repository, reload, showToast],
+    [currentUser, projects, repository, reload, showToast, notifyTask],
   );
 
   const updateTask = useCallback(
@@ -281,13 +363,18 @@ export function WorkspaceProvider({
         const updated = await repository.updateTask(taskId, safeInput);
         await reload();
         showToast('อัปเดตข้อมูลงานสำเร็จ', 'success');
+        const events: TaskNotificationEvent[] = [];
+        if (updated.assigneeId !== task.assigneeId) events.push('assigned');
+        if (updated.dueDate !== task.dueDate) events.push('dueDateChanged');
+        if (updated.status !== task.status) events.push(updated.status);
+        notifyTask(updated, ...events);
         return updated;
       } catch (err) {
         showToast(formatRepoError(err, 'อัปเดตข้อมูลงานไม่สำเร็จ'), 'error');
         return null;
       }
     },
-    [currentUser, tasks, projects, repository, reload, showToast],
+    [currentUser, tasks, projects, repository, reload, showToast, notifyTask],
   );
 
   const moveTaskStatus = useCallback(
@@ -310,13 +397,14 @@ export function WorkspaceProvider({
         await repository.updateTask(taskId, { status: newStatus });
         await reload();
         showToast(`อัปเดตสถานะงานเป็น: ${getThaiStatusName(newStatus)}`, 'success');
+        notifyTask(task, newStatus);
         return true;
       } catch (err) {
         showToast(formatRepoError(err, 'เปลี่ยนสถานะงานไม่สำเร็จ'), 'error');
         return false;
       }
     },
-    [currentUser, tasks, projects, repository, reload, showToast],
+    [currentUser, tasks, projects, repository, reload, showToast, notifyTask],
   );
 
   const approveTask = useCallback(
@@ -331,13 +419,14 @@ export function WorkspaceProvider({
         await repository.updateTask(taskId, { status: 'completed' });
         await reload();
         showToast(`อนุมัติงาน "${task.title}" สำเร็จแล้ว`, 'success');
+        if (task.status !== 'completed') notifyTask(task, 'completed');
         return true;
       } catch (err) {
         showToast(formatRepoError(err, 'อนุมัติงานไม่สำเร็จ'), 'error');
         return false;
       }
     },
-    [currentUser, tasks, projects, repository, reload, showToast],
+    [currentUser, tasks, projects, repository, reload, showToast, notifyTask],
   );
 
   const rejectTask = useCallback(
@@ -352,13 +441,14 @@ export function WorkspaceProvider({
         await repository.updateTask(taskId, { status: 'in_progress' });
         await reload();
         showToast(`ส่งงาน "${task.title}" กลับไปแก้ไขเพิ่มเติม`, 'warning');
+        if (task.status !== 'in_progress') notifyTask(task, 'in_progress');
         return true;
       } catch (err) {
         showToast(formatRepoError(err, 'ส่งกลับแก้ไขไม่สำเร็จ'), 'error');
         return false;
       }
     },
-    [currentUser, tasks, projects, repository, reload, showToast],
+    [currentUser, tasks, projects, repository, reload, showToast, notifyTask],
   );
 
   const deleteTask = useCallback(

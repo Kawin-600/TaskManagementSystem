@@ -30,7 +30,7 @@ export function AssignTasksBoard({ project, tasks, onTaskClick }: AssignTasksBoa
   }
 
   const members = getAssignableMembers(currentUser, project, users);
-  const handleDrop = async (e: DragEvent<HTMLDivElement>, memberId: string) => {
+  const handleDrop = async (e: DragEvent<HTMLElement>, memberId: string) => {
     e.preventDefault();
     setDragOverMemberId(null);
     const taskId = draggedTaskId || e.dataTransfer?.getData('text/plain');

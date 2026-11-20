@@ -10,11 +10,14 @@ import {
   AlertTriangle,
   Folder,
   CheckCircle2,
+  Send,
 } from 'lucide-react';
 import { formatThaiDateFull, formatThaiDateShort, getTodayStr, isTaskOverdue } from '../../domain/dates';
 import { canAccessAdmin, canManageUsers } from '../../domain/rbac';
 import { useAuth } from '../../state/AuthContext';
 import { useWorkspace } from '../../state/WorkspaceContext';
+import { useToast } from '../../state/ToastContext';
+import { requestTelegramSettings } from '../../services/telegramSettings';
 
 interface TopbarProps {
   hasSubPanelRoute: boolean;
@@ -37,6 +40,23 @@ export function Topbar({
   const { visibleProjects, visibleTasks, users } = useWorkspace();
   const location = useLocation();
   const navigate = useNavigate();
+  const { showToast } = useToast();
+  const [testingTelegram, setTestingTelegram] = useState(false);
+
+  async function testTelegram() {
+    if (!currentUser) return;
+    setTestingTelegram(true);
+    try {
+      const { result } = await requestTelegramSettings(currentUser.id, 'test');
+      if (result === 'accepted') showToast('Telegram ตอบรับข้อความทดสอบแล้ว ลองเปิดแชตกับบอต', 'success');
+      else if (result === 'unconfigured') showToast('บัญชีนี้ยังไม่ได้ตั้งค่า Telegram', 'warning');
+      else showToast('ส่งข้อความทดสอบไป Telegram ไม่สำเร็จ', 'error');
+    } catch {
+      showToast('ติดต่อระบบแจ้งเตือนไม่ได้', 'error');
+    } finally {
+      setTestingTelegram(false);
+    }
+  }
 
   const [query, setQuery] = useState('');
   const [searchFocused, setSearchFocused] = useState(false);
@@ -355,6 +375,19 @@ export function Topbar({
           <Calendar className="h-3.5 w-3.5" />
           <span>วันนี้: {formatThaiDateFull(todayStr)}</span>
         </div>
+
+        <button
+          type="button"
+          onClick={() => void testTelegram()}
+          disabled={testingTelegram}
+          title="ทดสอบ Telegram"
+          aria-label="ทดสอบ Telegram"
+          aria-busy={testingTelegram}
+          className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-50"
+        >
+          <Send className="h-3.5 w-3.5" />
+          <span className="hidden lg:inline">{testingTelegram ? 'กำลังส่ง…' : 'ทดสอบ Telegram'}</span>
+        </button>
 
         {/* Quick Create Task Button */}
         <button
