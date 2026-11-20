@@ -33,6 +33,7 @@ export function TaskDetailModal({ taskId, onClose }: TaskDetailModalProps) {
   const {
     visibleTasks,
     visibleProjects,
+    visibleMilestones,
     users,
     updateTask,
     approveTask,
@@ -52,6 +53,7 @@ export function TaskDetailModal({ taskId, onClose }: TaskDetailModalProps) {
 
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
+  const [milestoneId, setMilestoneId] = useState('');
   const [assigneeId, setAssigneeId] = useState('');
   const [status, setStatus] = useState<TaskStatus>('todo');
   const [priority, setPriority] = useState<TaskPriority>('medium');
@@ -67,6 +69,7 @@ export function TaskDetailModal({ taskId, onClose }: TaskDetailModalProps) {
     if (!task) return;
     setTitle(task.title);
     setDescription(task.description);
+    setMilestoneId(task.milestoneId ?? '');
     setAssigneeId(task.assigneeId);
     setStatus(task.status);
     setPriority(task.priority);
@@ -90,6 +93,9 @@ export function TaskDetailModal({ taskId, onClose }: TaskDetailModalProps) {
   const assigneeOptions = assignable.some((u) => u.id === task.assigneeId)
     ? assignable
     : [...assignable, ...users.filter((u) => u.id === task.assigneeId)];
+  const projectMilestones = visibleMilestones.filter(
+    (milestone) => milestone.projectId === task.projectId,
+  );
 
   const handleSave = async (e: FormEvent) => {
     e.preventDefault();
@@ -110,6 +116,7 @@ export function TaskDetailModal({ taskId, onClose }: TaskDetailModalProps) {
     const updated = await updateTask(task.id, {
       title: title.trim(),
       description: description.trim(),
+      milestoneId: milestoneId || null,
       assigneeId,
       status,
       priority,
@@ -201,6 +208,30 @@ export function TaskDetailModal({ taskId, onClose }: TaskDetailModalProps) {
             />
           </div>
 
+          <div>
+            <label htmlFor="edit-task-milestone" className="mb-1 block font-semibold text-slate-700">
+              Milestone (ไม่บังคับ)
+            </label>
+            <select
+              id="edit-task-milestone"
+              value={
+                projectMilestones.some((milestone) => milestone.id === milestoneId)
+                  ? milestoneId
+                  : ''
+              }
+              disabled={!editable}
+              onChange={(e) => setMilestoneId(e.target.value)}
+              className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 font-medium text-slate-800 disabled:bg-slate-100 disabled:text-slate-500"
+            >
+              <option value="">ไม่เชื่อมกับ Milestone</option>
+              {projectMilestones.map((milestone) => (
+                <option key={milestone.id} value={milestone.id}>
+                  {milestone.title}
+                </option>
+              ))}
+            </select>
+          </div>
+
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <div>
               <label htmlFor="edit-task-assignee" className="mb-1 block font-semibold text-slate-700">
@@ -213,6 +244,7 @@ export function TaskDetailModal({ taskId, onClose }: TaskDetailModalProps) {
                 onChange={(e) => setAssigneeId(e.target.value)}
                 className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 font-medium text-slate-800 disabled:bg-slate-100 disabled:text-slate-500"
               >
+                <option value="">ยังไม่มอบหมาย</option>
                 {assigneeOptions.map((u) => (
                   <option key={u.id} value={u.id}>
                     {u.name}
@@ -319,7 +351,10 @@ export function TaskDetailModal({ taskId, onClose }: TaskDetailModalProps) {
             {deletable ? (
               confirmingDelete ? (
                 <div className="flex items-center gap-2">
-                  <span className="font-semibold text-rose-600">ยืนยันลบงานนี้?</span>
+                  <span className="font-semibold text-rose-600">
+                    ยืนยันลบงานนี้?
+                    {task.milestoneId && ' Milestone ที่เชื่อมอยู่จะถูกลบไปพร้อมกัน'}
+                  </span>
                   <button
                     type="button"
                     onClick={handleDelete}

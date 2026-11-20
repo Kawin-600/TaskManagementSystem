@@ -12,7 +12,7 @@ import {
   CheckCircle2,
 } from 'lucide-react';
 import { formatThaiDateFull, formatThaiDateShort, getTodayStr, isTaskOverdue } from '../../domain/dates';
-import { canAccessAdmin } from '../../domain/rbac';
+import { canAccessAdmin, canManageUsers } from '../../domain/rbac';
 import { useAuth } from '../../state/AuthContext';
 import { useWorkspace } from '../../state/WorkspaceContext';
 
@@ -100,22 +100,31 @@ export function Topbar({
       };
     }
     if (path.startsWith('/admin/')) {
-      if (!currentUser || !canAccessAdmin(currentUser)) {
-        return {
-          title: 'ไม่มีสิทธิ์เข้าถึง',
-          subtitle: 'สงวนสิทธิ์เฉพาะผู้ดูแลระบบ (Admin)',
-        };
-      }
       if (path.startsWith('/admin/users')) {
+        if (!currentUser || !canManageUsers(currentUser)) {
+          return {
+            title: 'ไม่มีสิทธิ์เข้าถึง',
+            subtitle: 'สงวนสิทธิ์สำหรับ Admin และผู้บริหาร',
+          };
+        }
         return {
           title: 'จัดการผู้ใช้งาน',
-          subtitle: 'เพิ่ม แก้ไขบทบาท และดูแลบัญชีผู้ใช้ในองค์กร (Admin)',
+          subtitle:
+            currentUser.role === 'executive'
+              ? 'เพิ่มและลบบัญชีผู้ใช้ โดย role ที่สร้างใหม่เป็น Staff'
+              : 'เพิ่ม แก้ไขบทบาท และดูแลบัญชีผู้ใช้ในองค์กร (Admin)',
         };
       }
       if (path.startsWith('/admin/rbac')) {
+        if (!currentUser || !canAccessAdmin(currentUser)) {
+          return {
+            title: 'ไม่มีสิทธิ์เข้าถึง',
+            subtitle: 'สงวนสิทธิ์เฉพาะผู้ดูแลระบบ (Admin)',
+          };
+        }
         return {
           title: 'ตารางสิทธิ์การใช้งาน (RBAC Matrix)',
-          subtitle: 'รายละเอียดสิทธิ์การเข้าถึงแบบ Member-Scoped ทั้ง 3 บทบาท',
+          subtitle: 'รายละเอียดสิทธิ์การเข้าถึงแบบ Member-Scoped ทั้ง 4 บทบาท',
         };
       }
     }
@@ -137,7 +146,10 @@ export function Topbar({
 
   if (!currentUser) return null;
 
-  const isManager = currentUser.role === 'admin' || currentUser.role === 'supervisor';
+  const isManager =
+    currentUser.role === 'admin' ||
+    currentUser.role === 'supervisor' ||
+    currentUser.role === 'executive';
   const reviewTasks = visibleTasks.filter((t) => t.status === 'review');
   const myOverdueCount = visibleTasks.filter(
     (t) => t.assigneeId === currentUser.id && isTaskOverdue(t, todayStr),

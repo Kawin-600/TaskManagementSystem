@@ -3,6 +3,7 @@ import { Check, Minus, X, ShieldCheck } from 'lucide-react';
 interface MatrixRow {
   capability: string;
   admin: { type: 'allow' | 'partial' | 'deny'; text: string };
+  executive: { type: 'allow' | 'partial' | 'deny'; text: string };
   supervisor: { type: 'allow' | 'partial' | 'deny'; text: string };
   staff: { type: 'allow' | 'partial' | 'deny'; text: string };
 }
@@ -11,30 +12,35 @@ const ROWS: MatrixRow[] = [
   {
     capability: 'การมองเห็นโปรเจค, ปฏิทินรวม และภาระงานทีม (Member-Scoped)',
     admin: { type: 'allow', text: 'เห็นทุกโปรเจคและสมาชิกทั้งหมด' },
+    executive: { type: 'allow', text: 'เห็นทุกโปรเจคและสมาชิกทั้งหมด' },
     supervisor: { type: 'partial', text: 'เฉพาะโปรเจคที่ตนดูแลหรือเป็นสมาชิก' },
     staff: { type: 'partial', text: 'เฉพาะโปรเจคที่ตนเป็นสมาชิก' },
   },
   {
     capability: 'สร้างโปรเจคใหม่',
     admin: { type: 'allow', text: 'ทำได้ทั้งหมด' },
+    executive: { type: 'allow', text: 'สร้างได้ (เป็นหัวหน้าโปรเจคอัตโนมัติ)' },
     supervisor: { type: 'allow', text: 'สร้างได้ (เป็นหัวหน้าโปรเจคอัตโนมัติ)' },
     staff: { type: 'deny', text: 'ทำไม่ได้' },
   },
   {
     capability: 'แก้ไขโปรเจค / จัดการสมาชิกเข้า-ออก / ลบโปรเจค',
     admin: { type: 'allow', text: 'ทุกโปรเจค' },
+    executive: { type: 'allow', text: 'ทุกโปรเจค' },
     supervisor: { type: 'partial', text: 'เฉพาะโปรเจคที่ตนเป็นหัวหน้า' },
     staff: { type: 'deny', text: 'ดูรายชื่อสมาชิกได้อย่างเดียว' },
   },
   {
     capability: 'สร้างและมอบหมายงาน',
     admin: { type: 'allow', text: 'ทุกโปรเจค, มอบหมายสมาชิกในโปรเจคได้ทุกคน' },
+    executive: { type: 'allow', text: 'ทุกโปรเจค, มอบหมายสมาชิกในโปรเจคได้ทุกคน' },
     supervisor: { type: 'partial', text: 'โปรเจคที่เห็นได้, มอบหมายสมาชิกในโปรเจคได้' },
     staff: { type: 'partial', text: 'เฉพาะโปรเจคที่เป็นสมาชิก และผูกให้ตัวเองเท่านั้น' },
   },
   {
     capability: 'แก้ไขรายละเอียด / เปลี่ยนสถานะงาน (ล็อกงานที่เสร็จสิ้นสำหรับเจ้าหน้าที่)',
     admin: { type: 'allow', text: 'ทุกงานและทุกสถานะ' },
+    executive: { type: 'partial', text: 'ทุกงาน ยกเว้นอนุมัติให้เสร็จสิ้น' },
     supervisor: { type: 'partial', text: 'ทุกงานในโปรเจคที่เห็นได้' },
     staff: {
       type: 'partial',
@@ -44,24 +50,35 @@ const ROWS: MatrixRow[] = [
   {
     capability: 'อนุมัติ / ส่งกลับแก้ไข / เปิดงานที่เสร็จสิ้นใหม่',
     admin: { type: 'allow', text: 'ทำได้ทั้งหมด' },
+    executive: { type: 'deny', text: 'ทำไม่ได้' },
     supervisor: { type: 'partial', text: 'ในโปรเจคที่เห็นได้' },
     staff: { type: 'deny', text: 'ทำไม่ได้ (ส่งตรวจสอบได้เท่านั้น)' },
   },
   {
     capability: 'แสดงความคิดเห็น & แนบลิงก์ส่งงาน',
     admin: { type: 'allow', text: 'ทุกงาน' },
+    executive: { type: 'allow', text: 'ทุกงาน' },
     supervisor: { type: 'allow', text: 'ทุกงานในโปรเจคที่เห็นได้' },
     staff: { type: 'allow', text: 'ทุกงานในโปรเจคที่เป็นสมาชิก (รวมถึงงานที่เสร็จสิ้นแล้ว)' },
   },
   {
     capability: 'ลบงาน',
     admin: { type: 'allow', text: 'ทำได้ทั้งหมด' },
+    executive: { type: 'allow', text: 'ทุกงาน' },
     supervisor: { type: 'partial', text: 'ในโปรเจคที่เห็นได้' },
     staff: { type: 'deny', text: 'ทำไม่ได้' },
   },
   {
-    capability: 'จัดการผู้ใช้งานและตารางสิทธิ์ (Admin Settings)',
+    capability: 'จัดการผู้ใช้งาน',
     admin: { type: 'allow', text: 'ทำได้ทั้งหมด (ห้ามลดสิทธิ์หรือลบตัวเอง)' },
+    executive: { type: 'partial', text: 'สร้าง/ลบบัญชีได้; สร้างได้เฉพาะ Staff' },
+    supervisor: { type: 'deny', text: 'ไม่มีสิทธิ์เข้าถึง' },
+    staff: { type: 'deny', text: 'ไม่มีสิทธิ์เข้าถึง' },
+  },
+  {
+    capability: 'กำหนดสิทธิ์และดูตาราง RBAC',
+    admin: { type: 'allow', text: 'ทำได้ทั้งหมด' },
+    executive: { type: 'deny', text: 'ไม่มีสิทธิ์เข้าถึง' },
     supervisor: { type: 'deny', text: 'ไม่มีสิทธิ์เข้าถึง' },
     staff: { type: 'deny', text: 'ไม่มีสิทธิ์เข้าถึง' },
   },
@@ -113,6 +130,7 @@ export function AdminRbacPage() {
             <tr className="border-b border-slate-200 bg-slate-50 font-bold text-slate-700">
               <th className="p-3.5">ฟังก์ชันการใช้งาน</th>
               <th className="p-3.5 text-purple-700">Admin (ผู้ดูแลระบบ)</th>
+              <th className="p-3.5 text-sky-700">ผู้บริหาร (Executive)</th>
               <th className="p-3.5 text-indigo-700">หัวหน้างาน (Supervisor)</th>
               <th className="p-3.5 text-emerald-700">เจ้าหน้าที่ (Staff)</th>
             </tr>
@@ -123,6 +141,9 @@ export function AdminRbacPage() {
                 <td className="p-3.5 font-semibold text-slate-800">{row.capability}</td>
                 <td className="p-3.5">
                   <Cell item={row.admin} />
+                </td>
+                <td className="p-3.5">
+                  <Cell item={row.executive} />
                 </td>
                 <td className="p-3.5">
                   <Cell item={row.supervisor} />

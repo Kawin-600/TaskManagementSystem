@@ -77,3 +77,11 @@ export function shiftMonth(yearMonthStr: string, delta: number): string {
   const next = new Date(y, m - 1 + delta, 1);
   return `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}`;
 }
+
+export function getThaiMonthShort(month1to12: number): string {
+  return THAI_MONTHS_SHORT[month1to12 - 1] ?? '';
+}
+
+export function getThaiMonthFull(month1to12: number): string {
+  return THAI_MONTHS_FULL[month1to12 - 1] ?? '';
+}

@@ -1,4 +1,4 @@
-export type UserRole = 'admin' | 'supervisor' | 'staff';
+export type UserRole = 'admin' | 'supervisor' | 'executive' | 'staff';
 export type TaskStatus = 'todo' | 'in_progress' | 'review' | 'completed';
 export type TaskPriority = 'low' | 'medium' | 'high' | 'urgent';
 
@@ -31,6 +31,7 @@ export interface TaskComment {
 export interface Task {
   id: string;
   projectId: string;
+  milestoneId?: string;
   title: string;
   description: string;
   assigneeId: string;
@@ -53,6 +54,7 @@ export interface CreateTaskInput {
 }
 
 export interface UpdateTaskInput {
+  milestoneId?: string | null;
   title?: string;
   description?: string;
   assigneeId?: string;
@@ -83,4 +85,39 @@ export interface CreateUserInput {
   email: string;
   role: UserRole;
   password?: string;
+}
+
+export type MilestoneStatus = 'completed' | 'in_progress' | 'delayed' | 'not_started';
+
+export interface Milestone {
+  id: string;
+  projectId: string;
+  title: string;
+  ownerId: string;
+  startDate: string;
+  endDate: string;
+  progress: number;
+  /** 1-based phase within the project; several milestones may share one. Null means unassigned. */
+  phase: number | null;
+  createdAt: string;
+}
+
+export interface CreateMilestoneInput {
+  projectId: string;
+  title: string;
+  ownerId: string;
+  startDate: string;
+  endDate: string;
+  progress: number;
+  /** Omit to open a new last phase. */
+  phase?: number | null;
+}
+
+export interface UpdateMilestoneInput {
+  title?: string;
+  ownerId?: string;
+  startDate?: string;
+  endDate?: string;
+  progress?: number;
+  phase?: number | null;
 }

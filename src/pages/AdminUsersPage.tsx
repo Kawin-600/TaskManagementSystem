@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { UserPlus, Trash2, RotateCcw, AlertTriangle } from 'lucide-react';
 import { ENABLE_DEMO_AUTH } from '../config/appConfig';
-import { canDeleteUser, canModifyUserRole } from '../domain/rbac';
+import { canAccessAdmin, canDeleteUser, canModifyUserRole } from '../domain/rbac';
 import { useAuth } from '../state/AuthContext';
 import { useWorkspace } from '../state/WorkspaceContext';
 import type { User, UserRole } from '../types/models';
@@ -117,6 +117,7 @@ export function AdminUsersPage({ onOpenCreateUser }: AdminUsersPageProps) {
                   >
                     <option value="admin">Admin</option>
                     <option value="supervisor">หัวหน้างาน</option>
+                    <option value="executive">ผู้บริหาร</option>
                     <option value="staff">เจ้าหน้าที่</option>
                   </select>
 
@@ -145,7 +146,7 @@ export function AdminUsersPage({ onOpenCreateUser }: AdminUsersPageProps) {
       </div>
 
       {/* Discreet Demo Maintenance Panel */}
-      {ENABLE_DEMO_AUTH && (
+      {ENABLE_DEMO_AUTH && canAccessAdmin(currentUser) && (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-dashed border-slate-300 bg-slate-50/70 p-4 text-xs">
           <div>
             <p className="font-semibold text-slate-700">โหมดข้อมูลตัวอย่าง (Local Demo Storage)</p>

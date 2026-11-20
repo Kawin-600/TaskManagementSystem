@@ -1,6 +1,6 @@
 import { Link, useLocation } from 'react-router-dom';
 import { Plus, PanelLeftClose, FolderOpen, UserCog, Shield } from 'lucide-react';
-import { canCreateProject } from '../../domain/rbac';
+import { canAccessAdmin, canCreateProject } from '../../domain/rbac';
 import { useAuth } from '../../state/AuthContext';
 import { useWorkspace } from '../../state/WorkspaceContext';
 
@@ -119,7 +119,7 @@ export function ContextualSubPanel({
         <>
           <div className="flex h-14 items-center justify-between border-b border-slate-200/80 px-4">
             <span className="text-xs font-bold uppercase tracking-wider text-slate-600">
-              จัดการระบบ
+              {canAccessAdmin(currentUser) ? 'จัดการระบบ' : 'จัดการผู้ใช้'}
             </span>
             <button
               type="button"
@@ -145,18 +145,20 @@ export function ContextualSubPanel({
               <UserCog className="h-4 w-4 shrink-0" />
               <span>จัดการผู้ใช้งาน</span>
             </Link>
-            <Link
-              to="/admin/rbac"
-              onClick={onNavigate}
-              className={`flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-xs font-semibold transition ${
-                location.pathname === '/admin/rbac'
-                  ? 'bg-indigo-600 text-white shadow-sm'
-                  : 'text-slate-600 hover:bg-white hover:text-slate-900'
-              }`}
-            >
-              <Shield className="h-4 w-4 shrink-0" />
-              <span>ตารางสิทธิ์ (RBAC Matrix)</span>
-            </Link>
+            {canAccessAdmin(currentUser) && (
+              <Link
+                to="/admin/rbac"
+                onClick={onNavigate}
+                className={`flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-xs font-semibold transition ${
+                  location.pathname === '/admin/rbac'
+                    ? 'bg-indigo-600 text-white shadow-sm'
+                    : 'text-slate-600 hover:bg-white hover:text-slate-900'
+                }`}
+              >
+                <Shield className="h-4 w-4 shrink-0" />
+                <span>ตารางสิทธิ์ (RBAC Matrix)</span>
+              </Link>
+            )}
           </div>
         </>
       )}

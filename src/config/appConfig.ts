@@ -13,5 +13,6 @@ export const STORAGE_KEYS = {
   users: 'taskflow_v2_users',
   projects: 'taskflow_v2_projects',
   tasks: 'taskflow_v2_tasks',
+  milestones: 'taskflow_v2_milestones',
   session: 'taskflow_v2_session',
 } as const;

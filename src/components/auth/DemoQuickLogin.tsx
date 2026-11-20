@@ -1,6 +1,8 @@
-import { Shield, UserCheck, User } from 'lucide-react';
+import { Shield, UserCheck, User, Briefcase } from 'lucide-react';
 import { ENABLE_DEMO_AUTH } from '../../config/appConfig';
 import type { User as AppUser, UserRole } from '../../types/models';
+
+const DEMO_EXECUTIVE_USER_ID = 'demo-executive';
 
 interface DemoQuickLoginProps {
   users: AppUser[];
@@ -27,6 +29,12 @@ const ROLE_BUTTON_META: Array<{
     Icon: UserCheck,
   },
   {
+    role: 'executive',
+    label: 'ผู้บริหาร',
+    style: 'border-sky-200 bg-sky-50 text-sky-700 hover:bg-sky-100',
+    Icon: Briefcase,
+  },
+  {
     role: 'staff',
     label: 'เจ้าหน้าที่',
     style: 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100',
@@ -42,22 +50,22 @@ export function DemoQuickLogin({ users, isSubmitting, onQuickLogin }: DemoQuickL
       <p className="mb-2.5 text-center text-xs font-medium text-slate-500">
         ทดลองเข้าใช้งานด่วน (Demo Mode · รหัสผ่านเริ่มต้น: 1234)
       </p>
-      <div className="grid grid-cols-3 gap-2">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
         {ROLE_BUTTON_META.map(({ role, label, style, Icon }) => {
           const sample = users.find((u) => u.role === role);
-          if (!sample) return null;
+          if (!sample && role !== 'executive') return null;
           return (
             <button
               key={role}
               type="button"
               disabled={isSubmitting}
-              onClick={() => onQuickLogin(sample.id)}
+              onClick={() => onQuickLogin(sample?.id ?? DEMO_EXECUTIVE_USER_ID)}
               className={`flex flex-col items-center gap-1 rounded-xl border px-2 py-2.5 text-xs font-semibold transition-all disabled:opacity-50 ${style}`}
             >
               <Icon className="h-4 w-4" />
               <span>{label}</span>
               <span className="max-w-full truncate text-[10px] font-normal opacity-75">
-                {sample.name.split(' ')[0]}
+                {sample?.name.split(' ')[0] ?? 'บัญชีตัวอย่าง'}
               </span>
             </button>
           );

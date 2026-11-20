@@ -31,12 +31,14 @@ const PRIORITY_STYLES: Record<TaskPriority, string> = {
 const ROLE_NAMES: Record<UserRole, string> = {
   admin: 'Admin',
   supervisor: 'หัวหน้างาน',
+  executive: 'ผู้บริหาร',
   staff: 'เจ้าหน้าที่',
 };
 
 const ROLE_STYLES: Record<UserRole, string> = {
   admin: 'bg-purple-100 text-purple-700 border-purple-200',
   supervisor: 'bg-indigo-100 text-indigo-700 border-indigo-200',
+  executive: 'bg-sky-100 text-sky-700 border-sky-200',
   staff: 'bg-emerald-100 text-emerald-700 border-emerald-200',
 };
 
