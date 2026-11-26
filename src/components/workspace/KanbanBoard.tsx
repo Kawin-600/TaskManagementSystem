@@ -75,6 +75,7 @@ export function KanbanBoard({ project, tasks, onTaskClick }: KanbanBoardProps) {
   };
 
   const handleDragOver = (e: DragEvent<HTMLDivElement>, status: TaskStatus) => {
+    if (currentUser.role === 'executive') return;
     e.preventDefault();
     setDragOverCol(status);
   };
@@ -88,7 +89,7 @@ export function KanbanBoard({ project, tasks, onTaskClick }: KanbanBoardProps) {
     setDragOverCol(null);
     const id = draggedTaskId || e.dataTransfer?.getData('text/plain');
     setDraggedTaskId(null);
-    if (!id) return;
+    if (!id || currentUser.role === 'executive') return;
     await moveTaskStatus(id, newStatus);
   };
 
@@ -105,7 +106,7 @@ export function KanbanBoard({ project, tasks, onTaskClick }: KanbanBoardProps) {
             onDragOver={(e) => handleDragOver(e, id)}
             onDragLeave={handleDragLeave}
             onDrop={(e) => handleDrop(e, id)}
-            className={`kanban-col flex min-h-[460px] flex-col rounded-2xl border border-slate-200/80 bg-slate-100/80 p-3.5 transition ${
+            className={`kanban-col flex min-h-[460px] min-w-0 flex-col rounded-2xl border border-slate-200/80 bg-slate-100/80 p-3.5 transition ${
               isOver ? 'drag-over' : ''
             }`}
           >
@@ -130,7 +131,7 @@ export function KanbanBoard({ project, tasks, onTaskClick }: KanbanBoardProps) {
                 colTasks.map((task) => {
                   const assignee = users.find((u) => u.id === task.assigneeId);
                   const overdue = isTaskOverdue(task, todayStr);
-                  const draggable = canEditTask(currentUser, task, project);
+                  const draggable = currentUser.role !== 'executive' && canEditTask(currentUser, task, project);
                   const showApproveControls = canApproveOrRejectTask(currentUser, task, project);
                   const lockedForStaff = currentUser.role === 'staff' && task.status === 'completed';
 
@@ -151,15 +152,22 @@ export function KanbanBoard({ project, tasks, onTaskClick }: KanbanBoardProps) {
                         draggable ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'
                       }`}
                     >
-                      <div className="flex items-start justify-between gap-2">
-                        <h5 className="text-sm font-semibold leading-snug text-slate-800 group-hover:text-indigo-600">
+                      <div className="flex min-w-0 items-start justify-between gap-2">
+                        <h5 className="min-w-0 flex-1 break-words text-sm font-semibold leading-relaxed text-slate-800 group-hover:text-indigo-600">
                           {task.title}
                         </h5>
-                        <PriorityBadge priority={task.priority} />
+                        <span className="shrink-0"><PriorityBadge priority={task.priority} /></span>
                       </div>
 
+                      {(task.module?.trim() || task.feature?.trim()) && (
+                        <div className="space-y-1 text-xs leading-relaxed text-slate-600">
+                          {task.module?.trim() && <p className="break-words"><span className="text-slate-400">Module: </span>{task.module}</p>}
+                          {task.feature?.trim() && <p className="break-words"><span className="text-slate-400">Feature: </span>{task.feature}</p>}
+                        </div>
+                      )}
+
                       {task.description && (
-                        <p className="line-clamp-2 text-xs text-slate-500">{task.description}</p>
+                        <p className="line-clamp-2 break-words text-xs leading-relaxed text-slate-500">{task.description}</p>
                       )}
 
                       <div className="flex items-center justify-between text-xs text-slate-400">

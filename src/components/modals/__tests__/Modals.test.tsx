@@ -35,10 +35,10 @@ describe('Center Modals Suite', () => {
     localStorage.clear();
   });
 
-  it('CreateTaskModal updates live duration, blocks invalid dates/blank title preserving inputs, and locks Staff assignee (Review Focus #5)', async () => {
+  it('CreateTaskModal updates live duration, blocks invalid dates/blank title preserving inputs (Review Focus #5)', async () => {
     const user = userEvent.setup();
     const onClose = vi.fn();
-    const { repo, auth } = await setupUser('u3'); // Staff
+    const { repo, auth } = await setupUser('u2');
 
     wrap(
       repo,
@@ -47,11 +47,6 @@ describe('Center Modals Suite', () => {
     );
 
     await waitFor(() => expect(screen.getByText('5 วัน')).toBeInTheDocument());
-
-    // Staff assignee dropdown must only allow self (u3)
-    const assigneeSelect = screen.getByLabelText(/ผู้รับผิดชอบ/i) as HTMLSelectElement;
-    expect(assigneeSelect.disabled).toBe(true);
-    expect(assigneeSelect.value).toBe('u3');
 
     // Change dueDate before startDate -> invalid
     const titleInput = screen.getByLabelText(/หัวข้องาน/i) as HTMLInputElement;
@@ -71,6 +66,30 @@ describe('Center Modals Suite', () => {
     await user.type(titleInput, '   ');
     await user.click(screen.getByRole('button', { name: /บันทึกสร้างงาน/i }));
     expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('lets a collaborator save their own detail without changing another collaborator’s entry', async () => {
+    const { repo, auth } = await setupUser('u4');
+    await repo.updateTask('t102', { collaboratorIds: ['u4', 'u2'] });
+    await repo.saveCollaboratorDetail('t102', 'u2', 'ตรวจแบบ');
+    wrap(repo, auth, <TaskDetailModal taskId="t102" onClose={vi.fn()} />);
+    const field = await screen.findByLabelText('รายละเอียดเพิ่มเติมของฉัน');
+    expect(screen.getByText('ตรวจแบบ')).toBeInTheDocument();
+    fireEvent.change(field, { target: { value: 'จัดทำต้นฉบับ' } });
+    await userEvent.click(screen.getByRole('button', { name: 'บันทึกรายละเอียดของฉัน' }));
+    const task = (await repo.loadAll()).tasks.find(item => item.id === 't102');
+    expect(task?.collaboratorDetails).toEqual({ u2: 'ตรวจแบบ', u4: 'จัดทำต้นฉบับ' });
+  });
+
+  it('shows staff the due date and status without planning controls', async () => {
+    const { repo, auth } = await setupUser('u3');
+    wrap(repo, auth, <TaskDetailModal taskId="t102" onClose={vi.fn()} />);
+    expect(await screen.findByLabelText(/ชื่องาน/)).toBeEnabled();
+    expect(screen.queryByLabelText(/Milestone/i)).not.toBeInTheDocument();
+    expect(screen.queryByText('แผนการดำเนินงาน')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/วันเริ่มต้น/)).not.toBeInTheDocument();
+    expect(screen.getByText(/^กำหนดส่ง/)).toBeInTheDocument();
+    expect(screen.getByLabelText('สถานะ')).toBeEnabled();
   });
 
   it('TaskDetailModal locks completed tasks for Staff, allows safe linkified comments, and blocks javascript: links (Review Focus #5)', async () => {

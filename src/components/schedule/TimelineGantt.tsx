@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { Fragment, useMemo } from 'react';
 import { ZoomIn } from 'lucide-react';
 import { calculateDaysBetween, isTaskOverdue } from '../../domain/dates';
 import { buildGanttDays, computeGanttBarBounds } from '../../domain/scheduleLayout';
@@ -50,6 +50,14 @@ export function TimelineGantt({
   const dayColumns = useMemo(() => buildGanttDays(yearMonth, todayStr), [yearMonth, todayStr]);
   const projectMap = useMemo(() => new Map(projects.map((p) => [p.id, p])), [projects]);
   const userMap = useMemo(() => new Map(users.map((u) => [u.id, u])), [users]);
+  const orderedTasks = useMemo(() => {
+    const groups = new Map<string, Task[]>();
+    tasks.forEach((task) => {
+      const key = JSON.stringify([task.projectId, (task.module?.trim() || '').toLocaleLowerCase()]);
+      groups.set(key, [...(groups.get(key) ?? []), task]);
+    });
+    return [...groups.values()].flatMap((group) => group.map((task, index) => ({ task, first: index === 0, count: group.length })));
+  }, [tasks]);
 
   const todayIdx = dayColumns.findIndex((d) => d.isToday);
 
@@ -131,13 +139,14 @@ export function TimelineGantt({
             <div className="p-6 text-center text-xs text-slate-400">ไม่มีรายการงานในช่วงนี้</div>
           ) : (
             <div className="divide-y divide-slate-100">
-              {tasks.map((task) => {
+              {orderedTasks.map(({ task, first, count }) => {
                 const prj = projectMap.get(task.projectId);
                 const assignee = userMap.get(task.assigneeId);
                 const overdue = isTaskOverdue(task, todayStr);
                 return (
+                  <Fragment key={task.id}>
+                  {first && <div className="flex h-8 items-center gap-2 bg-indigo-50 px-3 text-xs font-bold text-indigo-900"><span className="truncate">{task.module?.trim() || 'ไม่ได้ระบุ Module'}</span><span className="shrink-0 text-[10px] font-medium text-indigo-600">{count} งาน · {prj?.name}</span></div>}
                   <button
-                    key={task.id}
                     type="button"
                     onClick={() => onTaskClick(task.id)}
                     className="flex h-12 w-full items-center justify-between gap-2 px-3 text-left transition hover:bg-slate-50"
@@ -156,7 +165,7 @@ export function TimelineGantt({
                           {task.title}
                         </span>
                       </div>
-                      <p className="truncate pl-3.5 text-[10px] text-slate-400">{prj?.name ?? '-'}</p>
+                      <p className="truncate pl-3.5 text-[10px] text-slate-500">{task.feature?.trim() || 'ไม่ได้ระบุ Feature'}</p>
                     </div>
                     <AvatarCircle
                       avatar={assignee?.avatar ?? '?'}
@@ -164,6 +173,7 @@ export function TimelineGantt({
                       size="xs"
                     />
                   </button>
+                  </Fragment>
                 );
               })}
             </div>
@@ -216,7 +226,7 @@ export function TimelineGantt({
               </div>
             )}
 
-            {tasks.map((task) => {
+            {orderedTasks.map(({ task, first }) => {
               const prj = projectMap.get(task.projectId);
               const overdue = isTaskOverdue(task, todayStr);
               const bounds = computeGanttBarBounds(task, dayColumns, colWidth);
@@ -227,7 +237,9 @@ export function TimelineGantt({
                   : prj?.color ?? '#4f46e5';
 
               return (
-                <div key={task.id} className="relative flex h-12 items-center">
+                <Fragment key={task.id}>
+                {first && <div className="h-8 bg-indigo-50" />}
+                <div className="relative flex h-12 items-center">
                   <div className="pointer-events-none absolute inset-0 flex">
                     {dayColumns.map((day) => (
                       <div
@@ -254,13 +266,14 @@ export function TimelineGantt({
                         overdue ? 'ring-2 ring-rose-500' : ''
                       }`}
                     >
-                      <span className="truncate">{task.title}</span>
+                      <span className="truncate">{task.feature?.trim() || task.title}</span>
                       <span className="ml-1 shrink-0 rounded bg-black/25 px-1.5 py-0.5 font-mono text-[9px]">
                         {totalDays} วัน
                       </span>
                     </button>
                   )}
                 </div>
+                </Fragment>
               );
             })}
           </div>

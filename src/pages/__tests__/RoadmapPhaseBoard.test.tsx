@@ -27,8 +27,10 @@ async function mountPhaseBoard(userId: string) {
     </MemoryRouter>,
   );
   await user.click(await screen.findByRole('button', { name: /แผนงาน \(Roadmap\)/ }));
-  await user.click(screen.getByRole('button', { name: 'บอร์ดเฟส' }));
-  await screen.findByTestId('phase-card-m101');
+  if (userId !== 'u3') {
+    await user.click(screen.getByRole('button', { name: 'บอร์ดเฟส' }));
+    await screen.findByTestId('phase-card-m101');
+  }
   return { repo, user };
 }
 
@@ -67,8 +69,10 @@ describe('Roadmap phase board', () => {
       expect(screen.getByTestId('phase-card-m102')).toHaveAttribute('data-phase', '1'),
     );
     const sharedPhase = screen.getByTestId('phase-col-p1-1');
+    expect(within(sharedPhase).getByTestId('phase-group-p1-1')).toBeInTheDocument();
     expect(within(sharedPhase).getByTestId('phase-card-m101')).toBeInTheDocument();
     expect(within(sharedPhase).getByTestId('phase-card-m102')).toBeInTheDocument();
+    expect(within(sharedPhase).getByTestId('phase-progress-p1-1')).toHaveTextContent('83%');
     expect(screen.getByTestId('phase-card-m103')).toHaveAttribute('data-phase', '2');
     expect(screen.queryByTestId('phase-col-p1-3')).not.toBeInTheDocument();
 
@@ -117,16 +121,11 @@ describe('Roadmap phase board', () => {
     expect(within(phase2).getByTestId('phase-card-m202')).toBeInTheDocument();
   });
 
-  it('is read-only for staff', async () => {
-    const { user, repo } = await mountPhaseBoard('u3');
+  it('hides the phase board from staff', async () => {
+    await mountPhaseBoard('u3');
 
-    expect(screen.getByTestId('phase-card-m102')).toHaveAttribute('draggable', 'false');
+    expect(screen.queryByRole('button', { name: 'บอร์ดเฟส' })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('phase-card-m102')).not.toBeInTheDocument();
     expect(screen.queryByTestId('phase-col-p1-new')).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /เพิ่ม Milestone ใน Phase/ })).not.toBeInTheDocument();
-
-    dragCardTo('m102', 'phase-col-p1-1');
-    await user.click(screen.getByTestId('phase-card-m102'));
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-    expect((await repo.loadAll()).milestones.find((m) => m.id === 'm102')?.phase).toBe(2);
   });
 });

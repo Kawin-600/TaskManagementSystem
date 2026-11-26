@@ -24,11 +24,23 @@ export function canManageProject(user: User, project: Project): boolean {
 
 export function getVisibleTasks(user: User, projects: Project[], tasks: Task[]): Task[] {
   const visibleProjectIds = new Set(getVisibleProjects(user, projects).map((p) => p.id));
-  return tasks.filter((task) => visibleProjectIds.has(task.projectId));
+  return tasks.filter((task) => visibleProjectIds.has(task.projectId) && canSeeTaskAssignment(user, task));
+}
+
+function canSeeTaskAssignment(user: User, task: Task): boolean {
+  return user.role !== 'staff' || task.status === 'completed' || participatesInTask(task, user.id);
+}
+
+export function participatesInTask(task: Task, userId: string): boolean {
+  return task.assigneeId === userId || !!task.collaboratorIds?.includes(userId);
+}
+
+export function canCreateTask(user: User): boolean {
+  return user.role === 'admin' || user.role === 'supervisor' || user.role === 'executive';
 }
 
 export function canCreateTaskInProject(user: User, project: Project): boolean {
-  return canViewProject(user, project);
+  return canCreateTask(user) && canViewProject(user, project);
 }
 
 export function getAssignableMembers(user: User, project: Project, allUsers: User[]): User[] {
@@ -39,6 +51,10 @@ export function getAssignableMembers(user: User, project: Project, allUsers: Use
   }
   const memberSet = new Set([...project.memberIds, project.supervisorId]);
   return allUsers.filter((u) => memberSet.has(u.id));
+}
+
+export function canSetTaskPriority(user: User): boolean {
+  return user.role === 'supervisor' || user.role === 'executive' || user.role === 'admin';
 }
 
 export function canEditTask(user: User, task: Task, project?: Project): boolean {
@@ -63,13 +79,7 @@ export function validateTaskStatusTransition(
   }
 
   if (user.role === 'executive') {
-    if (newStatus === 'completed' || task.status === 'completed') {
-      return { allowed: false, reason: 'ผู้บริหารไม่มีสิทธิ์อนุมัติหรือเปิดงานที่เสร็จสิ้นแล้ว' };
-    }
-    if (task.status === 'review' && newStatus !== 'review') {
-      return { allowed: false, reason: 'ผู้บริหารไม่มีสิทธิ์ตรวจหรือส่งงานกลับจากสถานะรอตรวจสอบ' };
-    }
-    return { allowed: true };
+    return { allowed: false, reason: 'ผู้บริหารไม่มีสิทธิ์เปลี่ยนสถานะงาน' };
   }
 
   if (task.assigneeId !== user.id) {
@@ -107,9 +117,10 @@ export function canDeleteTask(user: User, _task: Task, project?: Project): boole
   return user.role === 'admin' || user.role === 'supervisor' || user.role === 'executive';
 }
 
-export function canCommentOnTask(user: User, _task: Task, project?: Project): boolean {
-  if (project && !canViewProject(user, project)) return false;
-  return true;
+export function canCommentOnTask(user: User, task: Task, project?: Project): boolean {
+  if (project && (project.id !== task.projectId || !canViewProject(user, project))) return false;
+  if (!project && user.role === 'staff') return participatesInTask(task, user.id);
+  return canSeeTaskAssignment(user, task);
 }
 
 export function getVisibleTeamUsers(user: User, projects: Project[], allUsers: User[]): User[] {
@@ -151,5 +162,6 @@ export function getVisibleMilestones(
 }
 
 export function canManageMilestones(user: User, project: Project): boolean {
-  return canManageProject(user, project);
+  if (user.role === 'admin' || user.role === 'executive') return true;
+  return canViewProject(user, project);
 }

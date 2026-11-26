@@ -1,3 +1,4 @@
+import { participatesInTask } from '../../domain/rbac';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
@@ -42,7 +43,7 @@ export function IconRail({ onNavigate }: IconRailProps) {
   if (!currentUser) return null;
 
   const myActiveCount = visibleTasks.filter(
-    (t) => t.assigneeId === currentUser.id && t.status !== 'completed',
+    (t) => participatesInTask(t, currentUser.id) && t.status !== 'completed',
   ).length;
 
   const navItems = [

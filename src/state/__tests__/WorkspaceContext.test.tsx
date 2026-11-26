@@ -79,7 +79,7 @@ describe('WorkspaceContext RBAC integration', () => {
 
     // Staff cannot approve review task
     await user.click(screen.getByText('approve-t104'));
-    expect(screen.getByTestId('t104-status')).toHaveTextContent('review');
+    expect(screen.getByTestId('t104-status')).toHaveTextContent('hidden');
   });
 
   it('allows Supervisor to approve and reject review tasks in visible projects', async () => {

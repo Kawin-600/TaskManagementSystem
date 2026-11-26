@@ -1,3 +1,4 @@
+import { participatesInTask } from './rbac';
 import { addDays, formatThaiDateShort, getTodayStr } from './dates';
 import type { Project, Task, TaskPriority } from '../types/models';
 
@@ -22,7 +23,7 @@ export function answerTaskQuestion(
   const team = /ทีม|ทุกคน|ทุกโครงการ|ทุกโปรเจกต์/.test(query);
   const scope = project ? project.name : team ? 'ทีมที่คุณเข้าถึงได้' : 'ของคุณ';
   const scoped = tasks.filter((task) =>
-    project ? task.projectId === project.id : team || task.assigneeId === userId,
+    project ? task.projectId === project.id : team || participatesInTask(task, userId),
   );
   const pending = scoped.filter((task) => task.status !== 'completed');
   const overdue = pending.filter((task) => task.dueDate && task.dueDate < today);

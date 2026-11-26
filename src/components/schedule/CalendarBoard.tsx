@@ -134,6 +134,7 @@ export function CalendarBoard({
                             <button
                               type="button"
                               onClick={() => onTaskClick(bar.task.id)}
+                              title={`${bar.task.title} · Feature: ${bar.task.feature?.trim() || 'ไม่ได้ระบุ'}`}
                               style={{ backgroundColor: barColor }}
                               className={`flex h-6 w-full items-center justify-between overflow-hidden px-2 text-left text-[11px] font-medium text-white shadow-sm transition hover:brightness-110 ${
                                 bar.isStartInWeek ? 'rounded-l-lg' : 'rounded-l-none'
@@ -143,7 +144,7 @@ export function CalendarBoard({
                             >
                               <span className="flex min-w-0 items-center gap-1.5">
                                 <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-white/90" />
-                                <span className="truncate">{bar.task.title}</span>
+                                <span className="truncate">{bar.task.title}{bar.task.feature?.trim() ? ` · ${bar.task.feature.trim()}` : ''}</span>
                               </span>
                               <span className="ml-1 shrink-0 rounded bg-black/20 px-1 py-0.5 font-mono text-[9px]">
                                 {totalDays}วัน
@@ -208,6 +209,9 @@ export function CalendarBoard({
                       {task.title}
                     </span>
                   </div>
+                  <p className="mt-0.5 truncate pl-4 text-[11px] font-semibold text-indigo-700">
+                    Feature: {task.feature?.trim() || 'ไม่ได้ระบุ'}
+                  </p>
                   <p className="mt-0.5 pl-4 text-[11px] text-slate-400">
                     {formatThaiDateShort(task.startDate)} - {formatThaiDateShort(task.dueDate)} (
                     {calculateDaysBetween(task.startDate, task.dueDate)} วัน)

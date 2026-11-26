@@ -1,3 +1,4 @@
+import { participatesInTask } from '../domain/rbac';
 import { Link } from 'react-router-dom';
 import {
   FolderOpen,
@@ -28,7 +29,7 @@ export function DashboardPage({ onOpenTaskDetail }: DashboardPageProps) {
   const completedTasks = visibleTasks.filter((t) => t.status === 'completed');
   const reviewTasks = visibleTasks.filter((t) => t.status === 'review');
   const overdueTasks = visibleTasks.filter((t) => isTaskOverdue(t, todayStr));
-  const myTasks = visibleTasks.filter((t) => t.assigneeId === currentUser.id);
+  const myTasks = visibleTasks.filter((t) => participatesInTask(t, currentUser.id));
   const urgentQueue = visibleTasks
     .filter((t) => t.status === 'review' || isTaskOverdue(t, todayStr))
     .slice(0, 6);

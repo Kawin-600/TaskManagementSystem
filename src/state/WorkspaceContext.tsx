@@ -19,6 +19,7 @@ import {
   canDeleteTask,
   canDeleteUser,
   canEditTask,
+  canSetTaskPriority,
   canManageProject,
   canModifyUserRole,
   getVisibleProjects,
@@ -34,6 +35,8 @@ import type {
   CreateProjectInput,
   CreateTaskInput,
   CreateUserInput,
+  ImportProjectsInput,
+  ImportProjectsResult,
   Project,
   Task,
   TaskStatus,
@@ -69,6 +72,7 @@ interface WorkspaceContextValue {
   updateProject: (projectId: string, input: UpdateProjectInput) => Promise<Project | null>;
   updateProjectMembers: (projectId: string, memberIds: string[]) => Promise<boolean>;
   deleteProject: (projectId: string) => Promise<boolean>;
+  importProjects: (input: ImportProjectsInput) => Promise<ImportProjectsResult | null>;
   createTask: (input: CreateTaskInput) => Promise<Task | null>;
   updateTask: (taskId: string, input: UpdateTaskInput) => Promise<Task | null>;
   moveTaskStatus: (taskId: string, newStatus: TaskStatus) => Promise<boolean>;
@@ -76,6 +80,7 @@ interface WorkspaceContextValue {
   rejectTask: (taskId: string) => Promise<boolean>;
   deleteTask: (taskId: string) => Promise<boolean>;
   addComment: (taskId: string, text: string) => Promise<boolean>;
+  saveCollaboratorDetail: (taskId: string, text: string) => Promise<void>;
   createMilestone: (input: CreateMilestoneInput) => Promise<Milestone | null>;
   updateMilestone: (milestoneId: string, input: UpdateMilestoneInput) => Promise<Milestone | null>;
   deleteMilestone: (milestoneId: string) => Promise<boolean>;
@@ -326,6 +331,28 @@ export function WorkspaceProvider({
     [currentUser, projects, repository, reload, showToast],
   );
 
+  const importProjects = useCallback(
+    async (input: ImportProjectsInput): Promise<ImportProjectsResult | null> => {
+      if (!currentUser || !canCreateProject(currentUser) || input.supervisorId !== currentUser.id) {
+        showToast('คุณไม่มีสิทธิ์นำเข้าโปรเจค', 'error');
+        return null;
+      }
+      try {
+        const result = await repository.importProjects(input);
+        await reload();
+        const skipped = result.skippedProjectNames.length
+          ? ` (ข้ามโปรเจคชื่อซ้ำ ${result.skippedProjectNames.length} รายการ)`
+          : '';
+        showToast(`นำเข้า ${result.projectCount} โปรเจค และ ${result.taskCount} งานสำเร็จ${skipped}`, 'success');
+        return result;
+      } catch (err) {
+        showToast(formatRepoError(err, 'นำเข้า Excel ไม่สำเร็จ'), 'error');
+        return null;
+      }
+    },
+    [currentUser, repository, reload, showToast],
+  );
+
   const createTask = useCallback(
     async (input: CreateTaskInput): Promise<Task | null> => {
       const project = projects.find((p) => p.id === input.projectId);
@@ -335,7 +362,8 @@ export function WorkspaceProvider({
       }
       try {
         const assigneeId = currentUser.role === 'staff' ? currentUser.id : input.assigneeId;
-        const created = await repository.createTask({ ...input, assigneeId });
+        const priority = canSetTaskPriority(currentUser) ? input.priority : 'medium';
+        const created = await repository.createTask({ ...input, assigneeId, priority });
         await reload();
         showToast('สร้างงานใหม่สำเร็จเรียบร้อยแล้ว', 'success');
         notifyTask(created, 'created');
@@ -354,8 +382,21 @@ export function WorkspaceProvider({
       const project = projects.find((p) => p.id === task?.projectId);
       if (!currentUser || !task || !project) return null;
 
-      if (!canEditTask(currentUser, task, project)) {
+      if (!canEditTask(currentUser, task, project) || (currentUser.role === 'staff' && input.collaboratorIds !== undefined)) {
         showToast('คุณไม่มีสิทธิ์แก้ไขงานนี้', 'error');
+        return null;
+      }
+
+      if (currentUser.role === 'staff' && (
+        (input.startDate !== undefined && input.startDate !== task.startDate) ||
+        (input.dueDate !== undefined && input.dueDate !== task.dueDate)
+      )) {
+        showToast('เจ้าหน้าที่ไม่มีสิทธิ์เปลี่ยนวันเริ่มต้นหรือวันกำหนดส่ง', 'error');
+        return null;
+      }
+
+      if (!canSetTaskPriority(currentUser) && input.priority !== undefined && input.priority !== task.priority) {
+        showToast('คุณไม่มีสิทธิ์เปลี่ยนระดับความสำคัญของงาน', 'error');
         return null;
       }
 
@@ -482,6 +523,17 @@ export function WorkspaceProvider({
     },
     [currentUser, tasks, projects, repository, reload, showToast],
   );
+
+  const saveCollaboratorDetail = async (taskId: string, text: string) => {
+    if (!currentUser || !visibleTasks.some(task => task.id === taskId)) return;
+    try {
+      await repository.saveCollaboratorDetail(taskId, currentUser.id, text);
+      await reload();
+      showToast('บันทึกรายละเอียดของคุณแล้ว', 'success');
+    } catch (err) {
+      showToast(formatRepoError(err, 'บันทึกรายละเอียดไม่สำเร็จ'), 'error');
+    }
+  };
 
   const addComment = useCallback(
     async (taskId: string, text: string): Promise<boolean> => {
@@ -657,7 +709,7 @@ export function WorkspaceProvider({
       value={{
         users,
         projects,
-        tasks,
+        tasks: currentUser && currentUser.role !== 'staff' ? tasks : visibleTasks,
         milestones,
         visibleProjects,
         visibleTasks,
@@ -668,6 +720,7 @@ export function WorkspaceProvider({
         updateProject,
         updateProjectMembers,
         deleteProject,
+        importProjects,
         createTask,
         updateTask,
         moveTaskStatus,
@@ -675,6 +728,7 @@ export function WorkspaceProvider({
         rejectTask,
         deleteTask,
         addComment,
+        saveCollaboratorDetail,
         createMilestone,
         updateMilestone,
         deleteMilestone,

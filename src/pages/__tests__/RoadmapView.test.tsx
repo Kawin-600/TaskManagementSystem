@@ -124,15 +124,15 @@ describe('Roadmap view on the global schedule page', () => {
     await user.click(screen.getByTestId('roadmap-bar-m102'));
     const editDialog = await screen.findByRole('dialog', { name: 'แก้ไข Milestone' });
     expect(within(editDialog).getByLabelText(/โปรเจค/)).toBeDisabled();
-    fireEvent.change(within(editDialog).getByLabelText('ความคืบหน้า (%)'), {
-      target: { value: '100' },
+    expect(within(editDialog).queryByLabelText('ความคืบหน้า (%)')).not.toBeInTheDocument();
+    fireEvent.change(within(editDialog).getByLabelText(/ชื่อ Milestone/), {
+      target: { value: 'Milestone ที่แก้ไขแล้ว' },
     });
     await user.click(within(editDialog).getByRole('button', { name: 'บันทึกการแก้ไข' }));
 
     await waitFor(() =>
-      expect(screen.getByTestId('roadmap-bar-m102')).toHaveAttribute('data-status', 'completed'),
+      expect(screen.getAllByText('Milestone ที่แก้ไขแล้ว').length).toBeGreaterThan(0),
     );
-    expect(screen.getByTestId('roadmap-stat-completed')).toHaveTextContent('3');
 
     // Delete from the list view
     vi.spyOn(window, 'confirm').mockReturnValue(true);
@@ -145,20 +145,21 @@ describe('Roadmap view on the global schedule page', () => {
     expect((await repo.loadAll()).milestones.some((m) => m.id === 'm103')).toBe(false);
   });
 
-  it('is read-only for staff', async () => {
+  it('gives staff the same milestone controls for visible projects', async () => {
     const { user } = await mountSchedule('u3');
 
     await waitFor(() => expect(screen.getByTestId('roadmap-stat-total')).toHaveTextContent('5'));
-    expect(screen.queryByRole('button', { name: /เพิ่ม Milestone ใหม่/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /เพิ่ม Milestone ใหม่/ })).toBeInTheDocument();
 
     const bar = screen.getByTestId('roadmap-bar-m102');
-    expect(bar.tagName).toBe('DIV');
+    expect(bar.tagName).toBe('BUTTON');
     await user.click(bar);
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(await screen.findByRole('dialog', { name: 'แก้ไข Milestone' })).toBeInTheDocument();
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'ยกเลิก' }));
 
     await user.click(screen.getByRole('button', { name: /รายการเฟสงาน/ }));
-    expect(screen.queryByRole('button', { name: /^ลบ / })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /^แก้ไข / })).not.toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: /^ลบ / }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole('button', { name: /^แก้ไข / }).length).toBeGreaterThan(0);
   });
 
   it('shows an empty state when the selected projects have no milestones', async () => {

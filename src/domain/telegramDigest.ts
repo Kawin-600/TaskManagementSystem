@@ -1,3 +1,4 @@
+import { participatesInTask } from './rbac';
 import { formatDateObj, formatThaiDateShort } from './dates';
 import type { Task, TaskPriority, TaskStatus } from '../types/models';
 
@@ -36,7 +37,7 @@ export function selectTelegramDigestTasks(
 ) {
   const today = formatDateObj(now);
   return tasks.filter((task) => {
-    if (task.assigneeId !== userId || !priorities.includes(task.priority)) return false;
+    if (!participatesInTask(task, userId) || !priorities.includes(task.priority)) return false;
     if (kind === 'pending') return task.status !== 'completed';
     const createdDate = task.createdAt.length === 10 ? task.createdAt : formatDateObj(new Date(task.createdAt));
     return createdDate === today;

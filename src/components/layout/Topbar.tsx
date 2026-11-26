@@ -1,3 +1,4 @@
+import { participatesInTask } from '../../domain/rbac';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
@@ -13,7 +14,7 @@ import {
   Send,
 } from 'lucide-react';
 import { formatThaiDateFull, formatThaiDateShort, getTodayStr, isTaskOverdue } from '../../domain/dates';
-import { canAccessAdmin, canManageUsers } from '../../domain/rbac';
+import { canCreateTask, canAccessAdmin, canManageUsers } from '../../domain/rbac';
 import { useAuth } from '../../state/AuthContext';
 import { useWorkspace } from '../../state/WorkspaceContext';
 import { useToast } from '../../state/ToastContext';
@@ -172,7 +173,7 @@ export function Topbar({
     currentUser.role === 'executive';
   const reviewTasks = visibleTasks.filter((t) => t.status === 'review');
   const myOverdueCount = visibleTasks.filter(
-    (t) => t.assigneeId === currentUser.id && isTaskOverdue(t, todayStr),
+    (t) => participatesInTask(t, currentUser.id) && isTaskOverdue(t, todayStr),
   ).length;
 
   const currentProjectId = location.pathname.startsWith('/projects/')
@@ -390,15 +391,17 @@ export function Topbar({
         </button>
 
         {/* Quick Create Task Button */}
-        <button
-          type="button"
-          disabled={visibleProjects.length === 0}
-          onClick={() => onOpenCreateTask({ projectId: currentProjectId })}
-          className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm shadow-indigo-600/20 transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          <Plus className="h-3.5 w-3.5" />
-          <span className="hidden sm:inline">สร้างงาน</span>
-        </button>
+        {canCreateTask(currentUser) && (
+          <button
+            type="button"
+            disabled={visibleProjects.length === 0}
+            onClick={() => onOpenCreateTask({ projectId: currentProjectId })}
+            className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm shadow-indigo-600/20 transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">สร้างงาน</span>
+          </button>
+        )}
       </div>
     </header>
   );

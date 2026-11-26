@@ -1,3 +1,4 @@
+import { participatesInTask } from '../domain/rbac';
 import { useMemo, useState } from 'react';
 import {
   Calendar as CalendarIcon,
@@ -17,7 +18,7 @@ import {
   getTodayStr,
   shiftMonth,
 } from '../domain/dates';
-import { canManageMilestones } from '../domain/rbac';
+import { canCreateTask, canManageMilestones } from '../domain/rbac';
 import {
   MILESTONE_STATUS_LABELS,
   countMilestoneStats,
@@ -82,7 +83,7 @@ export function GlobalSchedulePage({
     return visibleTasks.filter((t) => {
       if (projectFilter !== 'all' && t.projectId !== projectFilter) return false;
       if (statusFilter !== 'all' && t.status !== statusFilter) return false;
-      if (assigneeFilter !== 'all' && t.assigneeId !== assigneeFilter) return false;
+      if (assigneeFilter !== 'all' && !participatesInTask(t, assigneeFilter)) return false;
       return true;
     });
   }, [visibleTasks, projectFilter, statusFilter, assigneeFilter]);
@@ -111,6 +112,7 @@ export function GlobalSchedulePage({
   if (!currentUser) return null;
 
   const isRoadmap = mode === 'roadmap';
+  const canViewPhaseBoard = currentUser.role !== 'staff';
   const canManageProjectMilestones = (projectId: string) => {
     const project = visibleProjects.find((p) => p.id === projectId);
     return Boolean(project && canManageMilestones(currentUser, project));
@@ -297,19 +299,21 @@ export function GlobalSchedulePage({
                   <ListChecks className="h-3.5 w-3.5" />
                   <span>รายการเฟสงาน</span>
                 </button>
-                <button
-                  type="button"
-                  aria-pressed={roadmapView === 'board'}
-                  onClick={() => setRoadmapView('board')}
-                  className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
-                    roadmapView === 'board'
-                      ? 'bg-white text-indigo-700 shadow-sm'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  <Columns3 className="h-3.5 w-3.5" />
-                  <span>บอร์ดเฟส</span>
-                </button>
+                {canViewPhaseBoard && (
+                  <button
+                    type="button"
+                    aria-pressed={roadmapView === 'board'}
+                    onClick={() => setRoadmapView('board')}
+                    className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                      roadmapView === 'board'
+                        ? 'bg-white text-indigo-700 shadow-sm'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    <Columns3 className="h-3.5 w-3.5" />
+                    <span>บอร์ดเฟส</span>
+                  </button>
+                )}
               </div>
 
               {canAddMilestone && (
@@ -349,7 +353,7 @@ export function GlobalSchedulePage({
               <p className="border-t border-slate-100 px-4 py-12 text-center text-sm text-slate-500">
                 ยังไม่มี Milestone ในโปรเจคที่เลือก
               </p>
-            ) : roadmapView === 'gantt' ? (
+            ) : roadmapView === 'gantt' || (roadmapView === 'board' && !canViewPhaseBoard) ? (
               <div className="border-t border-slate-200">
                 <RoadmapBoard yearMonth={yearMonth} {...roadmapViewProps} />
               </div>
@@ -391,7 +395,7 @@ export function GlobalSchedulePage({
             todayStr={todayStr}
             tasks={filteredTasks}
             projects={visibleProjects}
-            canAddTaskOnDate={visibleProjects.length > 0}
+            canAddTaskOnDate={canCreateTask(currentUser) && visibleProjects.length > 0}
             onTaskClick={onOpenTaskDetail}
             onAddTaskOnDate={(dateStr) =>
               onOpenCreateTask({

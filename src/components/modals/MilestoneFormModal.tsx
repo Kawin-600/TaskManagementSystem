@@ -17,11 +17,6 @@ interface MilestoneFormModalProps {
   defaultPhase?: number;
 }
 
-function clampProgress(value: number): number {
-  if (!Number.isFinite(value)) return 0;
-  return Math.min(100, Math.max(0, Math.round(value)));
-}
-
 const FIELD_CLASS =
   'w-full rounded-xl border border-slate-200 px-3 py-2 font-semibold text-slate-800 outline-none focus:border-indigo-500 disabled:bg-slate-100 disabled:text-slate-500';
 
@@ -36,11 +31,13 @@ export function MilestoneFormModal({
   const {
     visibleProjects,
     visibleMilestones,
+    visibleTasks,
     users,
     createMilestone,
     updateMilestone,
     deleteMilestone,
   } = useWorkspace();
+  const datesFromTasks = Boolean(milestone && visibleTasks.some((task) => task.milestoneId === milestone.id));
 
   const phaseCountOf = (pid: string) =>
     getPhaseCount(visibleMilestones.filter((m) => m.projectId === pid));
@@ -56,7 +53,6 @@ export function MilestoneFormModal({
   const [ownerId, setOwnerId] = useState('');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
-  const [progress, setProgress] = useState(0);
   const [phase, setPhase] = useState<number | null>(1);
   const [formError, setFormError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -71,7 +67,6 @@ export function MilestoneFormModal({
       setOwnerId(milestone.ownerId);
       setStartDate(milestone.startDate);
       setEndDate(milestone.endDate);
-      setProgress(milestone.progress);
       setPhase(milestone.phase);
     } else {
       const initialProject =
@@ -82,7 +77,6 @@ export function MilestoneFormModal({
       setOwnerId(initialProject?.supervisorId ?? '');
       setStartDate(today);
       setEndDate(addDays(today, 13));
-      setProgress(0);
       const nextPhase = initialProject ? phaseCountOf(initialProject.id) + 1 : 1;
       setPhase(defaultPhase && defaultPhase <= nextPhase ? defaultPhase : nextPhase);
     }
@@ -142,12 +136,11 @@ export function MilestoneFormModal({
       ownerId,
       startDate,
       endDate,
-      progress: clampProgress(progress),
       phase,
     };
     const saved = milestone
       ? await updateMilestone(milestone.id, payload)
-      : await createMilestone({ projectId, ...payload });
+      : await createMilestone({ projectId, ...payload, progress: 0 });
     setIsSaving(false);
     if (saved) onClose();
   };
@@ -165,7 +158,7 @@ export function MilestoneFormModal({
       onClose={onClose}
       size="md"
       title={milestone ? 'แก้ไข Milestone' : 'เพิ่ม Milestone ใหม่'}
-      subtitle="กำหนดเฟสงาน ผู้ดูแล ช่วงเวลา และความคืบหน้าของโปรเจค"
+      subtitle="กำหนดเฟสงาน ผู้ดูแล และช่วงเวลาของโปรเจค"
       headerAccent={project?.color}
     >
       <form onSubmit={handleSubmit} noValidate className="space-y-4 text-xs">
@@ -261,6 +254,7 @@ export function MilestoneFormModal({
               id="ms-start"
               type="date"
               value={startDate}
+              disabled={datesFromTasks}
               onChange={(e) => setStartDate(e.target.value)}
               className={FIELD_CLASS}
             />
@@ -273,39 +267,14 @@ export function MilestoneFormModal({
               id="ms-end"
               type="date"
               value={endDate}
+              disabled={datesFromTasks}
               min={startDate || undefined}
               onChange={(e) => setEndDate(e.target.value)}
               className={FIELD_CLASS}
             />
           </div>
         </div>
-
-        <div>
-          <label htmlFor="ms-progress" className="mb-1 block font-semibold text-slate-700">
-            ความคืบหน้า (%)
-          </label>
-          <div className="flex items-center gap-3">
-            <input
-              type="range"
-              aria-label="แถบเลื่อนความคืบหน้า"
-              min={0}
-              max={100}
-              step={5}
-              value={progress}
-              onChange={(e) => setProgress(clampProgress(Number(e.target.value)))}
-              className="flex-1 accent-indigo-600"
-            />
-            <input
-              id="ms-progress"
-              type="number"
-              min={0}
-              max={100}
-              value={progress}
-              onChange={(e) => setProgress(clampProgress(Number(e.target.value)))}
-              className="w-20 rounded-xl border border-slate-200 px-3 py-2 text-right font-bold text-slate-800 outline-none focus:border-indigo-500"
-            />
-          </div>
-        </div>
+        {datesFromTasks && <p className="text-xs text-slate-500">วันที่คำนวณจากช่วงวันของ Task ที่เชื่อมกับ Milestone นี้</p>}
 
         <div className="flex items-center justify-between gap-2 border-t border-slate-100 pt-4">
           {milestone ? (

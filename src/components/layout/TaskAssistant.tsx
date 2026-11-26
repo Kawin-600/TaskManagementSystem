@@ -1,3 +1,4 @@
+import { participatesInTask } from '../../domain/rbac';
 import { useEffect, useRef, useState } from 'react';
 import { MessageCircle, Send, X } from 'lucide-react';
 import { answerTaskQuestion, type AssistantReply } from '../../domain/taskAssistant';
@@ -44,12 +45,12 @@ export function TaskAssistant({ userId, onOpenTaskDetail }: {
       const projects = new Map(visibleProjects.map(({ id, name }) => [id, name]));
       const tasks = [...visibleTasks].sort((a, b) =>
         Number(b.status !== 'completed') - Number(a.status !== 'completed') ||
-        Number(b.assigneeId === userId) - Number(a.assigneeId === userId) ||
+        Number(participatesInTask(b, userId)) - Number(participatesInTask(a, userId)) ||
         (a.dueDate || '9999').localeCompare(b.dueDate || '9999'),
       ).slice(0, 60).map((task) => ({
         title: task.title.slice(0, 120),
         project: projects.get(task.projectId)?.slice(0, 80),
-        assignedToMe: task.assigneeId === userId,
+        assignedToMe: participatesInTask(task, userId),
         status: task.status,
         priority: task.priority,
         startDate: task.startDate,

@@ -216,6 +216,11 @@ describe('Core Workspace Pages', () => {
     );
 
     await user.click(await screen.findByRole('button', { name: /รายการ/ }));
+    const search = screen.getByRole('searchbox', { name: 'ค้นหารายการงาน' });
+    await user.type(search, 'API Documentation');
+    expect(screen.getByText('จัดทำเอกสาร API Documentation')).toBeInTheDocument();
+    expect(screen.queryByText('วิเคราะห์ Requirement หน้า UX/UI ใหม่')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'ล้างคำค้นหา' }));
     await user.click(await screen.findByRole('button', { name: /ลบงาน จัดทำเอกสาร API Documentation/ }));
 
     // Task must NOT be deleted immediately without confirming!
