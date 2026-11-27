@@ -162,7 +162,7 @@ export function IconRail({ onNavigate }: IconRailProps) {
             <Link to="/settings/telegram" onClick={() => { setAccountOpen(false); onNavigate?.(); }}
               className="mb-2 flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold hover:bg-slate-100">
               <Bell className="h-3.5 w-3.5" />
-              ตั้งค่า Telegram
+              ตั้งค่าการแจ้งเตือน
             </Link>
             <button
               type="button"

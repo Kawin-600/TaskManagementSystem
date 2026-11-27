@@ -6,7 +6,7 @@ import { taskNotificationMessages, type TaskNotificationEvent } from '../src/dom
 import { telegramDigestLabels, telegramDigestLimit } from '../src/domain/telegramDigest';
 
 export function taskNotifications(env: Record<string, string>): Plugin {
-  const { TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, TELEGRAM_CHAT_IDS, LINE_CHANNEL_ACCESS_TOKEN, LINE_RECIPIENT_ID } = env;
+  const { TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, TELEGRAM_CHAT_IDS } = env;
   const personalChats = new Map<string, string>();
   const storage = resolve('.taskflow-notifications');
   type TelegramAccount = { token: string; chatId: string };
@@ -42,7 +42,8 @@ export function taskNotifications(env: Record<string, string>): Plugin {
   }
 
   const middleware: Connect.NextHandleFunction = async (req, res, next) => {
-    const settings = req.url === '/api/task-notifications/telegram';
+    const lineSettings = req.url === '/api/task-notifications/line';
+    const settings = lineSettings || req.url === '/api/task-notifications/telegram';
     if (!settings && req.url !== '/api/task-notifications') return next();
 
     const reply = (status: number, data?: object) => {
@@ -58,7 +59,7 @@ export function taskNotifications(env: Record<string, string>): Plugin {
     let payload: {
       events?: unknown; test?: unknown; task?: unknown; assigneeId?: unknown;
       userId?: unknown; action?: unknown; token?: unknown; chatId?: unknown;
-      telegramEvents?: unknown; kind?: unknown; items?: unknown; total?: unknown; simulated?: unknown;
+      telegramEvents?: unknown; channel?: unknown; kind?: unknown; items?: unknown; total?: unknown; simulated?: unknown;
     } | null;
     try {
       const chunks: Buffer[] = [];
@@ -79,18 +80,22 @@ export function taskNotifications(env: Record<string, string>): Plugin {
     const accountPath = typeof workspace === 'string' &&
       /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(workspace) &&
       typeof accountId === 'string' && /^[a-zA-Z0-9_-]{1,64}$/.test(accountId)
-      ? resolve(storage, `${workspace}.${Buffer.from(accountId).toString('hex')}.json`)
+      ? resolve(storage, `${workspace}.${Buffer.from(accountId).toString('hex')}${lineSettings || (!settings && payload?.channel === 'line') ? '.line' : ''}.json`)
       : undefined;
     let account: TelegramAccount | null = null;
     try {
       if (accountPath && !test) account = await readAccount(accountPath);
+      const sendAccount = lineSettings ? async (target: TelegramAccount, message: string) => {
+        const response = await fetch('https://api.line.me/v2/bot/message/push', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${target.token}` }, body: JSON.stringify({ to: target.chatId, messages: [{ type: 'text', text: message }] }), signal: AbortSignal.timeout(8000) });
+        return response.ok ? 'accepted' : 'failed';
+      } : sendTelegram;
       if (settings) {
         if (!accountPath) return reply(400);
         if (payload?.action === 'status') return reply(200, { configured: Boolean(account) });
         if (payload?.action === 'test') {
           if (!account) return reply(409);
           try {
-            return reply(200, { result: await sendTelegram(account, 'TaskFlow Pro · ข้อความทดสอบการแจ้งเตือน') });
+            return reply(200, { result: await sendAccount(account, 'TaskFlow Pro · ข้อความทดสอบการแจ้งเตือน') });
           } catch {
             return reply(200, { result: 'failed' });
           }
@@ -114,7 +119,7 @@ export function taskNotifications(env: Record<string, string>): Plugin {
             ...lines,
             ...(total > items.length ? [`และอีก ${total - items.length} งานในเว็บ`] : []),
           ].join('\n');
-          return reply(200, { result: await sendTelegram(account, message).catch(() => 'failed') });
+          return reply(200, { result: await sendAccount(account, message).catch(() => 'failed') });
         }
         if (payload?.action === 'clear') {
           await rm(accountPath, { force: true });
@@ -123,7 +128,7 @@ export function taskNotifications(env: Record<string, string>): Plugin {
         if (payload?.action !== 'save') return reply(400);
         const token = typeof payload.token === 'string' ? payload.token.trim() : '';
         const chatId = typeof payload.chatId === 'string' ? payload.chatId.trim() : '';
-        if (!/^\d{1,20}:[a-zA-Z0-9_-]{15,100}$/.test(token) || !/^[1-9]\d{0,15}$/.test(chatId)) return reply(400);
+        if (lineSettings ? (!token || token.length > 2048 || !/^U[0-9a-f]{32}$/i.test(chatId)) : (!/^\d{1,20}:[a-zA-Z0-9_-]{15,100}$/.test(token) || !/^[1-9]\d{0,15}$/.test(chatId))) return reply(400);
         await mkdir(storage, { recursive: true, mode: 0o700 });
         const temporary = resolve(storage, `${randomUUID()}.tmp`);
         try {
@@ -138,8 +143,9 @@ export function taskNotifications(env: Record<string, string>): Plugin {
       if (settings) return reply(500);
     }
     const telegramChatId = test ? TELEGRAM_CHAT_ID : personalChats.get(assigneeId);
-    const sendToLine = !test && LINE_CHANNEL_ACCESS_TOKEN && LINE_RECIPIENT_ID;
-    if (!account && TELEGRAM_BOT_TOKEN && telegramChatId) {
+    const lineSelected = !test && payload?.channel === 'line';
+    const sendToLine = lineSelected && account;
+    if (!lineSelected && !account && TELEGRAM_BOT_TOKEN && telegramChatId) {
       account = { token: TELEGRAM_BOT_TOKEN, chatId: telegramChatId };
     }
     if (!account && !sendToLine) {
@@ -188,14 +194,14 @@ export function taskNotifications(env: Record<string, string>): Plugin {
     };
 
     const [telegram, line] = await Promise.all([
-      account && telegramEvents.length
+      !lineSelected && account && telegramEvents.length
         ? sendTelegram(account, message(telegramEvents)).catch(() => 'failed')
         : 'disabled',
-      sendToLine
+      sendToLine && telegramEvents.length
         ? send('https://api.line.me/v2/bot/message/push', {
-          to: LINE_RECIPIENT_ID,
-          messages: [{ type: 'text', text: message(events) }],
-        }, LINE_CHANNEL_ACCESS_TOKEN)
+          to: account!.chatId,
+          messages: [{ type: 'text', text: message(telegramEvents) }],
+        }, account!.token)
         : 'disabled',
     ]);
     return reply(200, { telegram, line });

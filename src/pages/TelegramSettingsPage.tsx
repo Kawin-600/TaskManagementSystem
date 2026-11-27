@@ -2,14 +2,15 @@ import { useEffect, useState } from 'react';
 import { useAuth } from '../state/AuthContext';
 import { useWorkspace } from '../state/WorkspaceContext';
 import { getThaiStatusName } from '../components/ui/Badges';
-import { readTelegramPreferences, requestTelegramSettings, saveTelegramPreferences } from '../services/telegramSettings';
+import { readTelegramPreferences, requestTelegramSettings, requestLineSettings, readNotificationChannel, saveNotificationChannel, saveTelegramPreferences, type NotificationChannel } from '../services/telegramSettings';
 import {
   buildTelegramDigest, selectTelegramDigestTasks, telegramDigestKinds, telegramDigestLabels,
   telegramPriorities, telegramPriorityLabels, telegramTopics, type TelegramDigestKind,
 } from '../domain/telegramDigest';
 import { taskNotificationMessages } from '../domain/taskNotifications';
 
-function TelegramSettings({ userId }: { userId: string }) {
+function TelegramSettings({ userId, channel }: { userId: string; channel: NotificationChannel }) {
+  const request = channel === 'line' ? requestLineSettings : requestTelegramSettings;
   const [configured, setConfigured] = useState<boolean>();
   const [token, setToken] = useState('');
   const [chatId, setChatId] = useState('');
@@ -18,7 +19,7 @@ function TelegramSettings({ userId }: { userId: string }) {
 
   useEffect(() => {
     const controller = new AbortController();
-    requestTelegramSettings(userId, 'status', undefined, controller.signal)
+    request(userId, 'status', undefined, controller.signal)
       .then((result) => setConfigured(result.configured === true))
       .catch(() => { if (!controller.signal.aborted) setFeedback('โหลดการตั้งค่า Telegram ไม่สำเร็จ'); });
     return () => controller.abort();
@@ -28,11 +29,11 @@ function TelegramSettings({ userId }: { userId: string }) {
     setBusy(true);
     setFeedback('');
     try {
-      const result = await requestTelegramSettings(userId, action, action === 'save' ? { token, chatId } : undefined);
+      const result = await request(userId, action, action === 'save' ? { token, chatId } : undefined);
       if (action === 'test') {
         setFeedback(result.result === 'accepted'
-          ? 'Telegram ตอบรับข้อความทดสอบแล้ว ลองเปิดแชตกับบอต'
-          : 'ส่งข้อความทดสอบไม่สำเร็จ ตรวจสอบ Token, Chat ID และกด Start กับบอตก่อน');
+          ? `${channel === 'line' ? 'LINE' : 'Telegram'} ตอบรับข้อความทดสอบแล้ว ลองเปิดแชตกับบอต`
+          : 'ส่งข้อความทดสอบไม่สำเร็จ ตรวจสอบ Token และ ID รวมถึงเพิ่มบอตเป็นเพื่อนหรือกด Start ก่อน');
       } else {
         setConfigured(result.configured === true);
         setToken('');
@@ -53,14 +54,14 @@ function TelegramSettings({ userId }: { userId: string }) {
         {configured === undefined ? 'กำลังตรวจการตั้งค่า…' : configured ? 'มีการตั้งค่าส่วนตัวแล้ว' : 'ยังไม่มีการตั้งค่าส่วนตัว'}
       </p>
       <label className="block text-sm font-medium text-slate-700">
-        Bot Token
-        <input type="password" autoComplete="off" required maxLength={128} value={token}
+        {channel === 'line' ? 'Channel access token (long-lived)' : 'Bot Token'}
+        <input type="password" autoComplete="off" required maxLength={2048} value={token}
           onChange={(event) => setToken(event.target.value)}
           className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2" />
       </label>
       <label className="block text-sm font-medium text-slate-700">
-        Chat ID ส่วนตัว
-        <input inputMode="numeric" autoComplete="off" required maxLength={16} value={chatId}
+        {channel === 'line' ? 'LINE User ID' : 'Chat ID ส่วนตัว'}
+        <input inputMode={channel === 'line' ? 'text' : 'numeric'} autoComplete="off" required maxLength={64} value={chatId}
           onChange={(event) => setChatId(event.target.value)}
           className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2" />
       </label>
@@ -103,7 +104,8 @@ function TelegramChecklist<T extends string>({ title, options, labels, selected,
   );
 }
 
-function TelegramConditionSettings({ userId }: { userId: string }) {
+function TelegramConditionSettings({ userId, channel }: { userId: string; channel: NotificationChannel }) {
+  const request = channel === 'line' ? requestLineSettings : requestTelegramSettings;
   const { visibleTasks, isLoading } = useWorkspace();
   const [preferences, setPreferences] = useState(() => readTelegramPreferences(userId));
   const [feedback, setFeedback] = useState('');
@@ -116,14 +118,14 @@ function TelegramConditionSettings({ userId }: { userId: string }) {
     setSimulationFeedback('');
     try {
       const tasks = selectTelegramDigestTasks(visibleTasks, userId, preferences.priorities, kind, new Date());
-      const result = await requestTelegramSettings(userId, 'digest', {
+      const result = await request(userId, 'digest', {
         ...buildTelegramDigest(kind, tasks, getThaiStatusName),
         simulated: true,
       });
       if (result.result === 'accepted') {
-        setSimulationFeedback(`Telegram ตอบรับข้อความจำลองรอบ ${time} แล้ว (${tasks.length} งาน)`);
+        setSimulationFeedback(`${channel === 'line' ? 'LINE' : 'Telegram'} ตอบรับข้อความจำลองรอบ ${time} แล้ว (${tasks.length} งาน)`);
       } else if (result.result === 'unconfigured') {
-        setSimulationFeedback('บันทึก Bot Token และ Chat ID ของบัญชีนี้ก่อนจำลองรอบส่ง');
+        setSimulationFeedback('บันทึก Token และ ID ของบัญชีนี้ก่อนจำลองรอบส่ง');
       } else {
         setSimulationFeedback(`ส่งข้อความจำลองรอบ ${time} ไม่สำเร็จ`);
       }
@@ -170,7 +172,7 @@ function TelegramConditionSettings({ userId }: { userId: string }) {
             </button>
           ))}
         </div>
-        <p className="text-sm text-slate-600">ส่งข้อความทดสอบเข้า Telegram ทันที โดยใช้ระดับความสำคัญที่เลือกตอนนี้</p>
+        <p className="text-sm text-slate-600">ส่งข้อความทดสอบเข้า {channel === 'line' ? 'LINE' : 'Telegram'} ทันที โดยใช้ระดับความสำคัญที่เลือกตอนนี้</p>
         {simulationFeedback && <p role="status" className="text-sm text-slate-700">{simulationFeedback}</p>}
       </div>
     </form>
@@ -179,13 +181,16 @@ function TelegramConditionSettings({ userId }: { userId: string }) {
 
 export function TelegramSettingsPage() {
   const { currentUser } = useAuth();
+  const [channel, setChannel] = useState<NotificationChannel>(() => currentUser ? readNotificationChannel(currentUser.id) : 'telegram');
+  useEffect(() => { if (currentUser) setChannel(readNotificationChannel(currentUser.id)); }, [currentUser]);
   if (!currentUser) return null;
   return (
     <div className="mx-auto max-w-xl space-y-4">
-      <h1 className="text-xl font-bold text-slate-900">ตั้งค่า Telegram</h1>
+      <h1 className="text-xl font-bold text-slate-900">ตั้งค่าการแจ้งเตือน</h1>
+      <label className="block text-sm font-medium">ช่องทางแจ้งเตือน <select className="ml-2 rounded-lg border border-slate-300 p-2" value={channel} onChange={(event) => { const value = event.target.value as NotificationChannel; setChannel(value); saveNotificationChannel(currentUser.id, value); }}><option value="telegram">Telegram</option><option value="line">LINE</option></select></label>
       <p className="text-sm text-slate-600">รับแจ้งเตือนงานของ {currentUser.name} ทางแชตส่วนตัวกับบอต</p>
-      <TelegramSettings key={currentUser.id} userId={currentUser.id} />
-      <TelegramConditionSettings key={`conditions-${currentUser.id}`} userId={currentUser.id} />
+      <TelegramSettings key={`${currentUser.id}-${channel}`} userId={currentUser.id} channel={channel} />
+      <TelegramConditionSettings key={`conditions-${currentUser.id}-${channel}`} userId={currentUser.id} channel={channel} />
     </div>
   );
 }

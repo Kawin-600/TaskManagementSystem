@@ -58,3 +58,18 @@ export function saveTelegramPreferences(userId: string, value: TelegramPreferenc
   localStorage.setItem(preferencesKey(userId), JSON.stringify(value));
   window.dispatchEvent(new Event('taskflow:telegram-preferences'));
 }
+
+export type NotificationChannel = 'telegram' | 'line';
+export function readNotificationChannel(userId: string): NotificationChannel {
+  return localStorage.getItem(`taskflow.notificationChannel.${userId}`) === 'line' ? 'line' : 'telegram';
+}
+export function saveNotificationChannel(userId: string, channel: NotificationChannel) {
+  localStorage.setItem(`taskflow.notificationChannel.${userId}`, channel);
+  window.dispatchEvent(new Event('taskflow:telegram-preferences'));
+}
+export async function requestLineSettings(userId: string, action: 'status' | 'save' | 'test' | 'clear' | 'digest', fields?: { token: string; chatId: string } | (ReturnType<typeof buildTelegramDigest> & { simulated?: boolean }), signal?: AbortSignal) {
+  const response = await fetch('/api/task-notifications/line', { method: 'POST', headers: telegramHeaders(), body: JSON.stringify({ userId, action, ...fields }), signal: signal ?? AbortSignal.timeout(10000) });
+  if (response.status === 409 && (action === 'test' || action === 'digest')) return { result: 'unconfigured' };
+  if (!response.ok) throw new Error(response.status === 400 ? 'ตรวจสอบ Channel access token และ LINE User ID' : 'ติดต่อระบบตั้งค่า LINE ไม่สำเร็จ');
+  return response.json();
+}

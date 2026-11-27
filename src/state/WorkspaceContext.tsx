@@ -48,7 +48,7 @@ import type {
 import { getThaiRoleName, getThaiStatusName } from '../components/ui/Badges';
 import type { TaskNotificationEvent } from '../domain/taskNotifications';
 import { formatDateObj, formatThaiDateShort } from '../domain/dates';
-import { readTelegramPreferences, requestTelegramSettings, telegramHeaders } from '../services/telegramSettings';
+import { readTelegramPreferences, requestTelegramSettings, requestLineSettings, readNotificationChannel, telegramHeaders } from '../services/telegramSettings';
 import {
   buildTelegramDigest,
   getTelegramDigestKind,
@@ -129,6 +129,7 @@ export function WorkspaceProvider({
         body: JSON.stringify({
           events,
           telegramEvents,
+          channel: readNotificationChannel(task.assigneeId),
           assigneeId: task.assigneeId,
           task: {
             title: task.title.slice(0, 180),
@@ -209,10 +210,11 @@ export function WorkspaceProvider({
           const kind = getTelegramDigestKind(now);
           const preferences = readTelegramPreferences(userId);
           if (!kind || !preferences.digests.includes(kind) || !preferences.priorities.length) return;
-          const historyKey = `${lockKey}.${kind}`;
+          const channel = readNotificationChannel(userId);
+          const historyKey = `${lockKey}.${channel}.${kind}`;
           if (localStorage.getItem(historyKey) === today) return;
           const eligible = selectTelegramDigestTasks(visibleTasks, userId, preferences.priorities, kind, now);
-          const result = await requestTelegramSettings(userId, 'digest', buildTelegramDigest(kind, eligible, getThaiStatusName));
+          const result = await (channel === 'line' ? requestLineSettings : requestTelegramSettings)(userId, 'digest', buildTelegramDigest(kind, eligible, getThaiStatusName));
           if (result.result === 'accepted') localStorage.setItem(historyKey, today);
         };
         if (navigator.locks) await navigator.locks.request(lockKey, sendDigest);
