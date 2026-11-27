@@ -17,6 +17,7 @@ import {
   canAccessAdmin,
   canModifyUserRole,
   canDeleteUser,
+  canManageMilestones,
 } from '../rbac';
 
 const admin: User = { id: 'u1', name: 'นพดล', email: 'a@t.local', role: 'admin', avatar: 'นพ', color: 'purple' };
@@ -67,6 +68,17 @@ const makeTask = (overrides: Partial<Task>): Task => ({
 });
 
 describe('Member-Scoped RBAC', () => {
+  it('blocks every executive status transition even on their own task', () => {
+    const executive: User = { ...admin, role: 'executive' };
+    const statuses = ['todo', 'in_progress', 'review', 'completed'] as const;
+    for (const status of statuses) {
+      const task = makeTask({ status, assigneeId: executive.id });
+      for (const next of statuses) {
+        expect(validateTaskStatusTransition(executive, task, next).allowed).toBe(false);
+      }
+    }
+  });
+
   it('scopes visible projects, tasks, and team users per role', () => {
     expect(getVisibleProjects(admin, allProjects).map((p) => p.id)).toEqual(['p1', 'p2', 'p3']);
     expect(getVisibleProjects(supervisor, allProjects).map((p) => p.id)).toEqual(['p1', 'p2']);
@@ -82,6 +94,15 @@ describe('Member-Scoped RBAC', () => {
     expect(getVisibleTasks(admin, allProjects, tasks).map((t) => t.id)).toEqual(['t1', 't2', 't3']);
     expect(getVisibleTasks(supervisor, allProjects, tasks).map((t) => t.id)).toEqual(['t1', 't2']);
     expect(getVisibleTasks(staffA, allProjects, tasks).map((t) => t.id)).toEqual(['t1']);
+    const shared = makeTask({ projectId: 'p1', assigneeId: 'u4', collaboratorIds: ['u3'] });
+    expect(getVisibleTasks(staffA, allProjects, [shared])).toEqual([shared]);
+    expect(canCommentOnTask(staffA, shared, projSupervisedByU2)).toBe(true);
+    expect(canEditTask(staffA, shared, projSupervisedByU2)).toBe(false);
+    expect(validateTaskStatusTransition(staffA, shared, 'review', projSupervisedByU2).allowed).toBe(false);
+    expect(getVisibleTasks(staffA, allProjects, [
+      makeTask({ projectId: 'p1', assigneeId: 'u4' }),
+      makeTask({ projectId: 'p1', assigneeId: '' }),
+    ])).toEqual([]);
 
     expect(getVisibleTeamUsers(admin, allProjects, allUsers).map((u) => u.id)).toEqual(['u1', 'u2', 'u3', 'u4']);
     expect(getVisibleTeamUsers(staffA, allProjects, allUsers).map((u) => u.id)).toEqual(['u2', 'u3']);
@@ -98,8 +119,16 @@ describe('Member-Scoped RBAC', () => {
     expect(canManageProject(staffA, projSupervisedByU2)).toBe(false);
   });
 
+  it('allows supervisors to manage phases in every project they can view', () => {
+    expect(canManageMilestones(supervisor, projSupervisedByU2)).toBe(true);
+    expect(canManageMilestones(supervisor, projSupervisedByAdminWithU2Member)).toBe(true);
+    expect(canManageMilestones(supervisor, projHiddenFromU2AndU3)).toBe(false);
+    expect(canManageMilestones(staffA, projSupervisedByU2)).toBe(true);
+    expect(canManageMilestones(staffA, projHiddenFromU2AndU3)).toBe(false);
+  });
+
   it('restricts Staff task creation to member projects and self-only assignment', () => {
-    expect(canCreateTaskInProject(staffA, projSupervisedByU2)).toBe(true);
+    expect(canCreateTaskInProject(staffA, projSupervisedByU2)).toBe(false);
     expect(canCreateTaskInProject(staffA, projHiddenFromU2AndU3)).toBe(false);
     expect(getAssignableMembers(staffA, projSupervisedByU2, allUsers).map((u) => u.id)).toEqual(['u3']);
     expect(getAssignableMembers(supervisor, projSupervisedByU2, allUsers).map((u) => u.id)).toEqual(['u2', 'u3']);
@@ -144,11 +173,18 @@ describe('Member-Scoped RBAC', () => {
     expect(canDeleteTask(staffA, reviewVisible, projSupervisedByU2)).toBe(false);
   });
 
-  it('allows Staff to comment on any task in member projects including completed tasks, never hidden projects', () => {
+  it('opens completed tasks for project member comments without granting edit access', () => {
     const completedInP1 = makeTask({ id: 't1', projectId: 'p1', assigneeId: 'u2', status: 'completed' });
     const taskInHiddenP3 = makeTask({ id: 't2', projectId: 'p3', assigneeId: 'u4', status: 'todo' });
 
+    const outside = { ...taskInHiddenP3, status: 'completed' as const };
+    const reopened = { ...completedInP1, status: 'in_progress' as const };
+    expect(getVisibleTasks(staffA, allProjects, [outside, completedInP1, reopened])).toEqual([completedInP1]);
     expect(canCommentOnTask(staffA, completedInP1, projSupervisedByU2)).toBe(true);
+    expect(canEditTask(staffA, completedInP1, projSupervisedByU2)).toBe(false);
+    expect(canCommentOnTask(staffA, outside, projHiddenFromU2AndU3)).toBe(false);
+    expect(canCommentOnTask(staffA, reopened, projSupervisedByU2)).toBe(false);
+    expect(canCommentOnTask(staffA, { ...completedInP1, assigneeId: staffA.id }, projSupervisedByU2)).toBe(true);
     expect(canCommentOnTask(staffA, taskInHiddenP3, projHiddenFromU2AndU3)).toBe(false);
   });
 

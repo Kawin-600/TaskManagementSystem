@@ -6,6 +6,7 @@ import { useAuth } from '../../state/AuthContext';
 import { useWorkspace } from '../../state/WorkspaceContext';
 import type { Project, Task } from '../../types/models';
 import { AvatarCircle, PriorityBadge, StatusBadge } from '../ui/Badges';
+import { TaskModuleGroups } from './TaskModuleGroups';
 
 interface AssignTasksBoardProps {
   project: Project;
@@ -30,7 +31,7 @@ export function AssignTasksBoard({ project, tasks, onTaskClick }: AssignTasksBoa
   }
 
   const members = getAssignableMembers(currentUser, project, users);
-  const handleDrop = async (e: DragEvent<HTMLDivElement>, memberId: string) => {
+  const handleDrop = async (e: DragEvent<HTMLElement>, memberId: string) => {
     e.preventDefault();
     setDragOverMemberId(null);
     const taskId = draggedTaskId || e.dataTransfer?.getData('text/plain');
@@ -64,32 +65,31 @@ export function AssignTasksBoard({ project, tasks, onTaskClick }: AssignTasksBoa
           setDragOverMemberId(null);
         }}
         onClick={() => onTaskClick(task.id)}
-        className={`group cursor-pointer space-y-2.5 rounded-xl border border-slate-200/90 bg-white p-3.5 shadow-sm transition hover:border-indigo-200 hover:shadow-md ${
+        className={`group cursor-pointer space-y-2.5 bg-white p-3.5 transition hover:bg-slate-50 ${
           draggable ? 'cursor-grab active:cursor-grabbing' : ''
         } ${draggedTaskId === task.id ? 'opacity-50' : ''}`}
       >
-        <div className="flex items-start justify-between gap-2">
-          <div className="flex min-w-0 items-start gap-1.5">
+        <div className="flex items-start gap-2">
+          <div className="flex min-w-0 flex-1 items-start gap-1.5">
             {draggable && <GripVertical className="mt-0.5 h-4 w-4 shrink-0 text-slate-300" />}
-            <h3 className="text-sm font-semibold leading-snug text-slate-800 group-hover:text-indigo-600">
+            <h3 className="min-w-0 break-words text-sm font-semibold leading-relaxed text-slate-800 group-hover:text-indigo-600">
               {task.title}
             </h3>
           </div>
           <PriorityBadge priority={task.priority} />
         </div>
 
-        {task.description && (
-          <p className="line-clamp-2 text-xs text-slate-500">{task.description}</p>
-        )}
+        {task.feature?.trim() && task.feature.trim() !== task.title.trim() && <p className="break-words text-xs leading-relaxed text-slate-500">Feature: {task.feature}</p>}
+        {task.description && <p className="line-clamp-2 break-words text-xs leading-relaxed text-slate-500">{task.description}</p>}
 
-        <div className="flex items-center justify-between gap-2 border-t border-slate-100 pt-2">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-2">
           <span
             className={`flex items-center gap-1 text-xs ${
               overdue ? 'font-bold text-rose-600' : 'text-slate-400'
             }`}
           >
             <Calendar className="h-3.5 w-3.5" />
-            {formatThaiDateShort(task.dueDate)}
+            {formatThaiDateShort(task.startDate)} – {formatThaiDateShort(task.dueDate)}
           </span>
           <StatusBadge status={task.status} />
         </div>
@@ -125,7 +125,7 @@ export function AssignTasksBoard({ project, tasks, onTaskClick }: AssignTasksBoa
               งานใหม่ที่ยังไม่มีผู้รับผิดชอบจะแสดงที่นี่
             </div>
           ) : (
-            unassignedTasks.map(renderTaskCard)
+            <TaskModuleGroups tasks={unassignedTasks} renderTask={renderTaskCard} />
           )}
         </div>
       </section>
@@ -164,7 +164,7 @@ export function AssignTasksBoard({ project, tasks, onTaskClick }: AssignTasksBoa
                   ลากงานมามอบหมายให้ {member.name}
                 </div>
               ) : (
-                  memberTasks.map(renderTaskCard)
+                  <TaskModuleGroups tasks={memberTasks} renderTask={renderTaskCard} />
               )}
             </div>
           </section>

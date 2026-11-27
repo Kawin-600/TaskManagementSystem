@@ -110,10 +110,10 @@ describe('LocalStorageRepository milestones', () => {
 
   it('stores progress as an integer clamped to 0-100 (Review Focus #5)', async () => {
     const repo = newRepo();
-    expect((await repo.createMilestone({ ...baseInput, progress: 150 })).progress).toBe(100);
-    expect((await repo.createMilestone({ ...baseInput, progress: -5 })).progress).toBe(0);
-    expect((await repo.createMilestone({ ...baseInput, progress: 33.6 })).progress).toBe(34);
-    expect((await repo.createMilestone({ ...baseInput, progress: Number.NaN })).progress).toBe(0);
+    expect((await repo.createMilestone({ ...baseInput, title: 'เฟส 150', progress: 150 })).progress).toBe(100);
+    expect((await repo.createMilestone({ ...baseInput, title: 'เฟส -5', progress: -5 })).progress).toBe(0);
+    expect((await repo.createMilestone({ ...baseInput, title: 'เฟส 33.6', progress: 33.6 })).progress).toBe(34);
+    expect((await repo.createMilestone({ ...baseInput, title: 'เฟส NaN', progress: Number.NaN })).progress).toBe(0);
     expect((await repo.updateMilestone('m102', { progress: 999 })).progress).toBe(100);
   });
 

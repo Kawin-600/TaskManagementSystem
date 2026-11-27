@@ -1,6 +1,8 @@
+import { TaskCollaborators } from './TaskCollaborators';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import {
   MessageSquare,
+  CalendarDays,
   Send,
   CheckCircle2,
   RotateCcw,
@@ -8,20 +10,29 @@ import {
   Lock,
   AlertCircle,
 } from 'lucide-react';
-import { calculateDaysBetween } from '../../domain/dates';
+import { calculateDaysBetween, formatThaiDateShort, isTaskOverdue } from '../../domain/dates';
 import { tokenizeCommentText } from '../../domain/linkify';
 import {
   canApproveOrRejectTask,
   canCommentOnTask,
   canDeleteTask,
   canEditTask,
+  canSetTaskPriority,
   getAssignableMembers,
+  validateTaskStatusTransition,
 } from '../../domain/rbac';
 import { useAuth } from '../../state/AuthContext';
 import { useWorkspace } from '../../state/WorkspaceContext';
 import type { TaskPriority, TaskStatus } from '../../types/models';
-import { AvatarCircle } from '../ui/Badges';
+import { AvatarCircle, PriorityBadge } from '../ui/Badges';
 import { Modal } from '../ui/Modal';
+
+const statusStyles: Record<TaskStatus, string> = {
+  todo: 'border-slate-200 bg-slate-50 text-slate-700',
+  in_progress: 'border-amber-200 bg-amber-50 text-amber-900',
+  review: 'border-indigo-200 bg-indigo-50 text-indigo-900',
+  completed: 'border-emerald-200 bg-emerald-50 text-emerald-900',
+};
 
 interface TaskDetailModalProps {
   taskId: string | null;
@@ -40,6 +51,8 @@ export function TaskDetailModal({ taskId, onClose }: TaskDetailModalProps) {
     rejectTask,
     deleteTask,
     addComment,
+    submitTask,
+    saveCollaboratorDetail,
   } = useWorkspace();
 
   const task = useMemo(
@@ -52,8 +65,11 @@ export function TaskDetailModal({ taskId, onClose }: TaskDetailModalProps) {
   );
 
   const [title, setTitle] = useState('');
+  const [module, setModule] = useState('');
+  const [feature, setFeature] = useState('');
   const [description, setDescription] = useState('');
   const [milestoneId, setMilestoneId] = useState('');
+  const [collaboratorIds, setCollaboratorIds] = useState<string[]>([]);
   const [assigneeId, setAssigneeId] = useState('');
   const [status, setStatus] = useState<TaskStatus>('todo');
   const [priority, setPriority] = useState<TaskPriority>('medium');
@@ -62,15 +78,29 @@ export function TaskDetailModal({ taskId, onClose }: TaskDetailModalProps) {
   const [commentInput, setCommentInput] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [submissionText, setSubmissionText] = useState('');
+  const [submissionLink, setSubmissionLink] = useState('');
+  const [submissionImage, setSubmissionImage] = useState('');
+  const [imageName, setImageName] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [returnReason, setReturnReason] = useState('');
+  const [returning, setReturning] = useState(false);
+  const [returnImage, setReturnImage] = useState('');
+  const [returnImageName, setReturnImageName] = useState('');
+  const [readingReturnImage, setReadingReturnImage] = useState(false);
+  const [completedTab, setCompletedTab] = useState<'details' | 'history' | 'comments'>('details');
 
   const taskIdKey = task?.id ?? null;
 
   useEffect(() => {
     if (!task) return;
     setTitle(task.title);
+    setModule(task.module ?? '');
+    setFeature(task.feature ?? '');
     setDescription(task.description);
     setMilestoneId(task.milestoneId ?? '');
     setAssigneeId(task.assigneeId);
+    setCollaboratorIds(task.collaboratorIds ?? []);
     setStatus(task.status);
     setPriority(task.priority);
     setStartDate(task.startDate);
@@ -78,13 +108,27 @@ export function TaskDetailModal({ taskId, onClose }: TaskDetailModalProps) {
     setCommentInput('');
     setFormError(null);
     setConfirmingDelete(false);
+    setSubmissionText('');
+    setSubmissionLink('');
+    setSubmissionImage('');
+    setImageName('');
+    setReturnReason('');
+    setReturning(false);
+    setReturnImage('');
+    setReturnImageName('');
+    setReadingReturnImage(false);
+    setCompletedTab('details');
     // Sync form only when switching to a different task, not when comments reload
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [taskIdKey]);
 
   if (!task || !currentUser) return null;
 
+  const isStaff = currentUser.role === 'staff';
   const editable = canEditTask(currentUser, task, project);
+  const statusEditable = editable && currentUser.role !== 'executive';
+  const priorityEditable = editable && canSetTaskPriority(currentUser);
+  const datesEditable = editable && currentUser.role !== 'staff';
   const canApprove = canApproveOrRejectTask(currentUser, task, project);
   const deletable = canDeleteTask(currentUser, task, project);
   const commentable = canCommentOnTask(currentUser, task, project);
@@ -97,6 +141,80 @@ export function TaskDetailModal({ taskId, onClose }: TaskDetailModalProps) {
     (milestone) => milestone.projectId === task.projectId,
   );
 
+  const history = task.comments.filter((comment) => comment.text.startsWith('ส่งงานเพื่อตรวจสอบ') || comment.text.startsWith('ส่งกลับแก้ไข\n'));
+  const historySection = history.length > 0 && (
+    <section className="space-y-3 border-t border-slate-200 pt-4" aria-label="ประวัติการส่งและตรวจงาน">
+      <h4 className="font-bold text-slate-800">ประวัติการส่งและตรวจงาน</h4>
+      {history.map((comment, index) => {
+        const isReturn = comment.text.startsWith('ส่งกลับแก้ไข\n');
+        const round = history.slice(0, index + 1).filter((item) => item.text.startsWith('ส่งงานเพื่อตรวจสอบ')).length;
+        const details = comment.text.replace(isReturn ? /^ส่งกลับแก้ไข\n/ : /^ส่งงานเพื่อตรวจสอบ\n?/, '');
+        return <article key={comment.id} className={`space-y-2 rounded-xl border p-3 ${isReturn ? 'border-amber-200 bg-amber-50' : 'border-slate-200 bg-slate-50'}`}>
+          <div className="flex flex-wrap items-center justify-between gap-2"><strong className={isReturn ? 'text-amber-900' : 'text-indigo-900'}>{isReturn ? 'ส่งกลับแก้ไข' : 'ส่งงาน'}{round > 0 ? ` · รอบที่ ${round}` : ''}</strong><time className="text-xs text-slate-500">{comment.createdAt.replace('T', ' ').slice(0, 16)}</time></div>
+          <p className="text-xs text-slate-600">โดย {users.find((user) => user.id === comment.userId)?.name ?? 'ผู้ใช้งาน'}</p>
+          {details && <p className="whitespace-pre-wrap break-words text-slate-700">{tokenizeCommentText(details).map((segment, segmentIndex) => segment.type === 'link' ? <a key={segmentIndex} href={segment.href} target="_blank" rel="noopener noreferrer" className="text-indigo-600 underline">{segment.value}</a> : <span key={segmentIndex}>{segment.value}</span>)}</p>}
+          {comment.image && <a href={comment.image} target="_blank" rel="noopener noreferrer"><img src={comment.image} alt={isReturn ? 'ภาพประกอบคำแนะนำ' : 'ภาพผลงานที่ส่ง'} className="max-h-48 max-w-full rounded-xl object-contain" /></a>}
+        </article>;
+      })}
+    </section>
+  );
+
+  if (task.status === 'in_progress') {
+    const canSubmit = commentable && validateTaskStatusTransition(currentUser, task, 'review', project).allowed;
+    const feedback = [...task.comments].reverse().find((comment) => comment.text.startsWith('ส่งกลับแก้ไข\n'));
+    const lastSubmissionIndex = task.comments.reduce((last, comment, index) => comment.text.startsWith('ส่งงานเพื่อตรวจสอบ') ? index : last, -1);
+    const feedbackIndex = feedback ? task.comments.findIndex((comment) => comment.id === feedback.id) : -1;
+    const handleImage = (file?: File) => {
+      setSubmissionImage('');
+      setImageName('');
+      setFormError(null);
+      if (!file) return;
+      if (!['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(file.type) || file.size > 1024 * 1024) {
+        setFormError('กรุณาเลือกภาพ JPG, PNG, WebP หรือ GIF ขนาดไม่เกิน 1 MB');
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = () => { if (typeof reader.result === 'string') { setSubmissionImage(reader.result); setImageName(file.name); } };
+      reader.onerror = () => setFormError('อ่านไฟล์ภาพไม่สำเร็จ กรุณาลองอีกครั้ง');
+      reader.readAsDataURL(file);
+    };
+    const handleSubmit = async (event: FormEvent) => {
+      event.preventDefault();
+      if (submitting) return;
+      if (!submissionText.trim() && !submissionLink.trim() && !submissionImage) {
+        setFormError('กรุณาระบุรายละเอียด ลิงก์ หรือแนบภาพอย่างน้อยหนึ่งรายการ');
+        return;
+      }
+      if (submissionLink.trim()) {
+        try {
+          const url = new URL(submissionLink.trim());
+          if (!['http:', 'https:'].includes(url.protocol)) throw new Error();
+        } catch { setFormError('กรุณาระบุลิงก์ที่ขึ้นต้นด้วย http:// หรือ https://'); return; }
+      }
+      setFormError(null);
+      setSubmitting(true);
+      const text = ['ส่งงานเพื่อตรวจสอบ', submissionText.trim(), submissionLink.trim()].filter(Boolean).join('\n');
+      if (await submitTask(task.id, text, submissionImage || undefined)) onClose();
+      setSubmitting(false);
+    };
+    return (
+      <Modal isOpen onClose={onClose} title="ส่งงาน" subtitle={`${task.title} · ${project?.name ?? ''}`} headerAccent={project?.color ?? '#4f46e5'}>
+        {canSubmit ? (
+          <form onSubmit={handleSubmit} className="space-y-4 text-sm">
+            <p className="rounded-xl bg-indigo-50 p-3 text-indigo-900">ส่งผลงานเพื่อให้ผู้รับผิดชอบตรวจสอบ เมื่อส่งแล้วสถานะจะเปลี่ยนเป็นรอตรวจสอบ</p>
+            {feedback && feedbackIndex > lastSubmissionIndex && <section className="space-y-2 rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-950"><h4 className="font-bold">งานถูกส่งกลับให้แก้ไข</h4><p className="text-xs">โดย {users.find((user) => user.id === feedback.userId)?.name ?? 'ผู้ตรวจ'} · {feedback.createdAt.replace('T', ' ').slice(0, 16)}</p><p className="whitespace-pre-wrap break-words">{feedback.text.replace(/^ส่งกลับแก้ไข\n/, '')}</p>{feedback.image && <a href={feedback.image} target="_blank" rel="noopener noreferrer"><img src={feedback.image} alt="ภาพประกอบคำแนะนำจากผู้ตรวจ" className="max-h-80 max-w-full rounded-xl object-contain" /></a>}</section>}
+            {formError && <p role="alert" className="rounded-xl bg-rose-50 p-3 text-rose-700">{formError}</p>}
+            <div><label htmlFor="submission-details" className="mb-1 block font-semibold text-slate-700">รายละเอียดผลงาน</label><textarea id="submission-details" rows={4} value={submissionText} onChange={(e) => setSubmissionText(e.target.value)} className="w-full rounded-xl border border-slate-200 p-3" placeholder="อธิบายผลงานที่ส่ง" /></div>
+            <div><label htmlFor="submission-link" className="mb-1 block font-semibold text-slate-700">ลิงก์ผลงาน</label><input id="submission-link" type="url" value={submissionLink} onChange={(e) => setSubmissionLink(e.target.value)} className="w-full rounded-xl border border-slate-200 p-3" placeholder="https://..." /></div>
+            <div><label htmlFor="submission-image" className="mb-1 block font-semibold text-slate-700">แนบภาพ</label><input id="submission-image" type="file" accept="image/jpeg,image/png,image/webp,image/gif" onChange={(e) => handleImage(e.target.files?.[0])} className="block w-full text-slate-600" /><p className="mt-1 text-xs text-slate-500">JPG, PNG, WebP หรือ GIF ไม่เกิน 1 MB</p>{submissionImage && <img src={submissionImage} alt={`ภาพที่แนบ ${imageName}`} className="mt-3 max-h-48 rounded-xl object-contain" />}</div>
+            {historySection}
+            <div className="flex justify-end gap-2 border-t border-slate-100 pt-4"><button type="button" onClick={onClose} className="rounded-xl border border-slate-200 px-4 py-2 font-semibold text-slate-600">ปิด</button><button type="submit" disabled={submitting} className="rounded-xl bg-indigo-600 px-5 py-2 font-semibold text-white disabled:opacity-50">{submitting ? 'กำลังส่งงาน...' : 'ส่งงาน'}</button></div>
+          </form>
+        ) : <div className="space-y-4 text-sm"><p className="text-slate-600">ผู้รับผิดชอบงานสามารถส่งผลงานเพื่อตรวจสอบได้จากหน้านี้</p>{historySection}</div>}
+      </Modal>
+    );
+  }
+
   const handleSave = async (e: FormEvent) => {
     e.preventDefault();
     setFormError(null);
@@ -105,23 +223,23 @@ export function TaskDetailModal({ taskId, onClose }: TaskDetailModalProps) {
       setFormError('กรุณาระบุชื่องาน');
       return;
     }
-    if (!startDate || !dueDate) {
+    if (datesEditable && (!startDate || !dueDate)) {
       setFormError('กรุณาระบุวันเริ่มต้นและวันกำหนดส่ง');
       return;
     }
-    if (dueDate < startDate) {
+    if (datesEditable && dueDate < startDate) {
       setFormError('วันกำหนดส่งต้องไม่น้อยกว่าวันเริ่มต้น');
       return;
     }
     const updated = await updateTask(task.id, {
       title: title.trim(),
+      module: module.trim(),
+      feature: feature.trim(),
       description: description.trim(),
-      milestoneId: milestoneId || null,
-      assigneeId,
-      status,
-      priority,
-      startDate,
-      dueDate,
+      ...(!isStaff && { milestoneId: milestoneId || null, assigneeId, collaboratorIds }),
+      ...(statusEditable && { status }),
+      ...(priorityEditable && { priority }),
+      ...(datesEditable && { startDate, dueDate }),
     });
     if (updated) {
       onClose();
@@ -134,7 +252,10 @@ export function TaskDetailModal({ taskId, onClose }: TaskDetailModalProps) {
   };
 
   const handleReject = async () => {
-    const ok = await rejectTask(task.id);
+    if (!returnReason.trim()) { setFormError('กรุณาระบุสิ่งที่ต้องแก้ไข'); return; }
+    setReturning(true);
+    const ok = await rejectTask(task.id, returnReason, returnImage || undefined);
+    setReturning(false);
     if (ok) onClose();
   };
 
@@ -143,11 +264,72 @@ export function TaskDetailModal({ taskId, onClose }: TaskDetailModalProps) {
     if (ok) onClose();
   };
 
+  if (task.status === 'review') {
+    const submitted = task.comments.filter((comment) => comment.text.startsWith('ส่งงานเพื่อตรวจสอบ\n') || comment.text === 'ส่งงานเพื่อตรวจสอบ');
+    const submissions = submitted.length ? submitted : task.comments;
+    const handleReturnImage = (file?: File) => {
+      setReturnImage('');
+      setReturnImageName('');
+      setFormError(null);
+      if (!file) return;
+      if (!['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(file.type) || file.size > 1024 * 1024) {
+        setFormError('กรุณาเลือกภาพ JPG, PNG, WebP หรือ GIF ขนาดไม่เกิน 1 MB');
+        return;
+      }
+      setReadingReturnImage(true);
+      const reader = new FileReader();
+      reader.onload = () => { if (typeof reader.result === 'string') { setReturnImage(reader.result); setReturnImageName(file.name); } setReadingReturnImage(false); };
+      reader.onerror = () => { setFormError('อ่านไฟล์ภาพไม่สำเร็จ กรุณาลองอีกครั้ง'); setReadingReturnImage(false); };
+      reader.readAsDataURL(file);
+    };
+    return (
+      <Modal isOpen onClose={onClose} title="ตรวจสอบงาน" subtitle={`${task.title} · ${project?.name ?? ''}`} headerAccent={project?.color ?? '#4f46e5'}>
+        <div className="space-y-4 text-sm">
+          <p className="rounded-xl bg-indigo-50 p-3 text-indigo-900">งานนี้กำลังรอการตรวจสอบ</p>
+          <section aria-label="ผลงานที่ส่ง" className="space-y-3">
+            <h4 className="font-bold text-slate-800">ผลงานที่ส่ง</h4>
+            {submissions.length === 0 ? <p className="rounded-xl bg-slate-50 p-4 text-slate-500">ยังไม่มีรายละเอียดผลงานที่ส่งผ่านหน้าส่งงาน</p> : submissions.slice().reverse().map((comment) => {
+              const author = users.find((user) => user.id === comment.userId);
+              const details = comment.text.replace(/^ส่งงานเพื่อตรวจสอบ\n?/, '');
+              return <article key={comment.id} className="space-y-3 rounded-xl border border-slate-200 p-4">
+                <div className="flex flex-wrap justify-between gap-2 text-xs text-slate-500"><span className="font-semibold text-slate-700">ส่งโดย {author?.name ?? 'ผู้ใช้งาน'}</span><time>{comment.createdAt.replace('T', ' ').slice(0, 16)}</time></div>
+                {details && <p className="whitespace-pre-wrap break-words text-slate-700">{tokenizeCommentText(details).map((segment, index) => segment.type === 'link' ? <a key={index} href={segment.href} target="_blank" rel="noopener noreferrer" className="text-indigo-600 underline">{segment.value}</a> : <span key={index}>{segment.value}</span>)}</p>}
+                {comment.image && <a href={comment.image} target="_blank" rel="noopener noreferrer"><img src={comment.image} alt="ภาพผลงานที่ส่ง" className="max-h-80 max-w-full rounded-xl object-contain" /></a>}
+              </article>;
+            })}
+          </section>
+          {historySection}
+          {canApprove && <div className="space-y-3 border-t border-slate-100 pt-4"><label htmlFor="return-reason" className="block font-semibold text-slate-700">สิ่งที่ต้องแก้ไข <span className="font-normal text-slate-500">(จำเป็นเมื่อส่งกลับ)</span></label><textarea id="return-reason" rows={3} value={returnReason} onChange={(event) => { setReturnReason(event.target.value); setFormError(null); }} placeholder="ระบุสิ่งที่ต้องแก้ไขให้ชัดเจน" className="w-full rounded-xl border border-slate-200 p-3" /><div><label htmlFor="return-image" className="mb-1 block font-semibold text-slate-700">ภาพประกอบคำแนะนำ (ไม่บังคับ)</label><input id="return-image" type="file" accept="image/jpeg,image/png,image/webp,image/gif" onChange={(event) => handleReturnImage(event.target.files?.[0])} className="block w-full text-slate-600" /><p className="mt-1 text-xs text-slate-500">JPG, PNG, WebP หรือ GIF ไม่เกิน 1 MB</p>{returnImage && <img src={returnImage} alt={`ภาพประกอบที่แนบ ${returnImageName}`} className="mt-3 max-h-48 max-w-full rounded-xl object-contain" />}</div>{formError && <p role="alert" className="text-rose-700">{formError}</p>}<div className="flex flex-wrap justify-end gap-2"><button type="button" disabled={returning || readingReturnImage} onClick={handleReject} className="inline-flex items-center gap-2 rounded-xl border border-rose-200 px-4 py-2 font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-50"><RotateCcw className="h-4 w-4" />{returning ? 'กำลังส่งกลับ...' : 'ส่งกลับแก้ไข'}</button><button type="button" disabled={returning} onClick={handleApprove} className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"><CheckCircle2 className="h-4 w-4" />อนุมัติงาน</button></div></div>}
+        </div>
+      </Modal>
+    );
+  }
+
   const handleAddComment = async () => {
     if (!commentInput.trim()) return;
     const ok = await addComment(task.id, commentInput);
     if (ok) setCommentInput('');
   };
+
+  const statusField = (
+  <div>
+    <label htmlFor="edit-task-status" className="mb-1 block font-semibold text-slate-700">
+      สถานะ
+    </label>
+    <select
+      id="edit-task-status"
+      value={statusEditable ? status : task.status}
+      disabled={!statusEditable}
+      onChange={(e) => setStatus(e.target.value as TaskStatus)}
+      className={`w-full rounded-xl border px-3 py-2 font-semibold disabled:opacity-80 ${statusStyles[status]}`}
+    >
+      <option value="todo">รอดำเนินการ</option>
+      <option value="in_progress">กำลังทำ</option>
+      <option value="review">รอตรวจสอบ (Review)</option>
+      {(!isStaff || task.status === 'completed') && <option value="completed">เสร็จสิ้น</option>}
+    </select>
+  </div>
+  );
 
   const durationDays =
     startDate && dueDate && dueDate >= startDate ? calculateDaysBetween(startDate, dueDate) : 0;
@@ -156,10 +338,18 @@ export function TaskDetailModal({ taskId, onClose }: TaskDetailModalProps) {
     <Modal
       isOpen={Boolean(task)}
       onClose={onClose}
-      title={project?.name ?? 'รายละเอียดงาน'}
+      title={task.title}
+      subtitle={project?.name}
       headerAccent={project?.color ?? '#4f46e5'}
     >
       <div className="space-y-4 text-xs">
+        {task.status === 'completed' && <div role="tablist" aria-label="ข้อมูลงานที่เสร็จสิ้น" className="flex justify-end gap-1 border-b border-slate-200">
+          <button type="button" role="tab" aria-selected={completedTab === 'details'} onClick={() => setCompletedTab('details')} className={`border-b-2 px-4 py-2.5 font-semibold ${completedTab === 'details' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>ข้อมูลงาน</button>
+          <button type="button" role="tab" aria-selected={completedTab === 'history'} onClick={() => setCompletedTab('history')} className={`border-b-2 px-4 py-2.5 font-semibold ${completedTab === 'history' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>ประวัติการทำงาน</button>
+          <button type="button" role="tab" aria-selected={completedTab === 'comments'} onClick={() => setCompletedTab('comments')} className={`border-b-2 px-4 py-2.5 font-semibold ${completedTab === 'comments' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>ความคิด</button>
+        </div>}
+        {task.status === 'completed' && completedTab === 'history' && <div role="tabpanel">{historySection || <p className="py-8 text-center text-slate-500">ยังไม่มีประวัติการส่งและตรวจงาน</p>}</div>}
+        {(task.status !== 'completed' || completedTab === 'details') && <>
         {isStaffCompletedLock && (
           <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3.5 py-2.5 text-emerald-800">
             <Lock className="h-4 w-4 shrink-0 text-emerald-600" />
@@ -180,23 +370,178 @@ export function TaskDetailModal({ taskId, onClose }: TaskDetailModalProps) {
         )}
 
         <form onSubmit={handleSave} noValidate className="space-y-4">
-          <div>
-            <label htmlFor="edit-task-title" className="mb-1 block font-semibold text-slate-700">
-              ชื่องาน *
-            </label>
-            <input
-              id="edit-task-title"
-              type="text"
-              value={title}
-              disabled={!editable}
-              onChange={(e) => setTitle(e.target.value)}
-              className="w-full rounded-xl border border-slate-200 px-3 py-2 font-semibold text-slate-800 disabled:bg-slate-100 disabled:text-slate-500"
-            />
-          </div>
+          <section aria-label="ข้อมูลงาน" className="space-y-3 rounded-xl border border-slate-200 p-4">
+            <div>
+              <label htmlFor="edit-task-title" className="mb-1 block font-semibold text-slate-700">
+                Task *
+              </label>
+              <input
+                id="edit-task-title"
+                type="text"
+                value={title}
+                disabled={!editable}
+                onChange={(e) => setTitle(e.target.value)}
+                className="w-full rounded-xl border border-slate-200 px-3 py-2 font-semibold text-slate-800 disabled:bg-slate-100 disabled:text-slate-500"
+              />
+            </div>
+
+            <div>
+              <label htmlFor="edit-task-module" className="mb-1 block font-semibold text-slate-700">Module</label>
+              <input id="edit-task-module" value={module} disabled={!editable} onChange={(e) => setModule(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-slate-800 disabled:bg-slate-100" />
+            </div>
+
+            <div>
+              <label htmlFor="edit-task-feature" className="mb-1 block font-semibold text-slate-700">
+                Feature
+              </label>
+              <input
+                id="edit-task-feature"
+                type="text"
+                value={feature}
+                disabled={!editable}
+                onChange={(e) => setFeature(e.target.value)}
+                placeholder="เช่น สมัครใช้งาน หรือ หน้าการเงิน"
+                className="w-full rounded-xl border border-slate-200 px-3 py-2 font-medium text-slate-800 disabled:bg-slate-100 disabled:text-slate-500"
+              />
+            </div>
+
+            {!isStaff && (
+              <div>
+                <label htmlFor="edit-task-milestone" className="mb-1 block font-semibold text-slate-700">
+                  Milestone (ไม่บังคับ)
+                </label>
+                <select
+                  id="edit-task-milestone"
+                  value={
+                    projectMilestones.some((milestone) => milestone.id === milestoneId)
+                      ? milestoneId
+                      : ''
+                  }
+                  disabled={!editable}
+                  onChange={(e) => setMilestoneId(e.target.value)}
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 font-medium text-slate-800 disabled:bg-slate-100 disabled:text-slate-500"
+                >
+                  <option value="">ไม่เชื่อมกับ Milestone</option>
+                  {projectMilestones.map((milestone) => (
+                    <option key={milestone.id} value={milestone.id}>
+                      {milestone.title}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+          </section>
+
+          {isStaff ? (
+            <section aria-label="สรุปงาน" className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+              <div className="grid items-center gap-4 p-4 sm:grid-cols-[minmax(0,1fr)_11rem]">
+                <dl className="flex flex-wrap items-center gap-x-6 gap-y-3">
+                  <div>
+                    <dt className="flex items-center gap-1.5 font-medium text-slate-600">
+                      <CalendarDays aria-hidden="true" className="h-4 w-4 text-indigo-600" />
+                      กำหนดส่ง
+                    </dt>
+                    <dd className="mt-1 text-base font-bold text-slate-900">
+                      {task.dueDate ? <time dateTime={task.dueDate}>{formatThaiDateShort(task.dueDate)}</time> : 'ยังไม่ระบุ'}
+                    </dd>
+                  </div>
+                  <div className="border-l border-slate-200 pl-4">
+                    <dt className="font-medium text-slate-600">ความสำคัญ</dt>
+                    <dd className="mt-1"><PriorityBadge priority={task.priority} /></dd>
+                  </div>
+                </dl>
+                {statusField}
+              </div>
+                {!!task.collaboratorIds?.length && (
+                  <div className="space-y-1 border-t border-slate-100 bg-slate-50 px-4 py-2.5 leading-relaxed text-slate-600">
+                    <p>ผู้รับผิดชอบหลัก · {users.find(u => u.id === task.assigneeId)?.name}</p>
+                    <p>ผู้ร่วมงาน · {users.filter(u => task.collaboratorIds?.includes(u.id)).map(u => u.name).join(', ')}</p>
+                  </div>
+                )}
+            </section>
+          ) : (
+            <fieldset className="space-y-3 rounded-xl border border-indigo-100 bg-indigo-50/40 px-4 pb-4">
+              <legend className="px-2 text-sm font-bold text-indigo-900">แผนการดำเนินงาน</legend>
+              <div className="grid gap-3 sm:grid-cols-3">
+                <div>
+                  <label htmlFor="edit-task-assignee" className="mb-1 block font-semibold text-slate-700">
+                    ผู้รับผิดชอบหลัก
+                  </label>
+                  <select
+                    id="edit-task-assignee"
+                    value={assigneeId}
+                    disabled={!editable || currentUser.role === 'staff'}
+                    onChange={(e) => setAssigneeId(e.target.value)}
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 font-medium text-slate-800 disabled:bg-slate-100 disabled:text-slate-500"
+                  >
+                    <option value="">ยังไม่มอบหมาย</option>
+                    {assigneeOptions.map((u) => (
+                      <option key={u.id} value={u.id}>
+                        {u.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {statusField}
+
+                <div>
+                  <label htmlFor="edit-task-priority" className="mb-1 block font-semibold text-slate-700">
+                    ความสำคัญ
+                  </label>
+                  <select
+                    id="edit-task-priority"
+                    value={priorityEditable ? priority : task.priority}
+                    disabled={!priorityEditable}
+                    onChange={(e) => setPriority(e.target.value as TaskPriority)}
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 font-medium text-slate-800 disabled:bg-slate-100 disabled:text-slate-500"
+                  >
+                    <option value="low">ต่ำ</option>
+                    <option value="medium">ปานกลาง</option>
+                    <option value="high">สูง</option>
+                    <option value="urgent">ด่วนที่สุด</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <label htmlFor="edit-task-start" className="mb-1 block font-semibold text-slate-700">
+                    วันเริ่มต้น
+                  </label>
+                  <input
+                    id="edit-task-start"
+                    type="date"
+                    value={startDate}
+                    disabled={!datesEditable}
+                    onChange={(e) => setStartDate(e.target.value)}
+                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-1.5 font-medium text-slate-800 disabled:bg-slate-100"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="edit-task-due" className="mb-1 block font-semibold text-slate-700">
+                    {isTaskOverdue({ dueDate, status }) && <span className="mr-2 rounded bg-rose-100 px-2 py-0.5 text-rose-800">เลยกำหนด</span>}
+                    วันกำหนดส่ง {durationDays > 0 ? `(${durationDays} วัน)` : ''}
+                  </label>
+                  <input
+                    id="edit-task-due"
+                    type="date"
+                    value={dueDate}
+                    disabled={!datesEditable}
+                    onChange={(e) => setDueDate(e.target.value)}
+                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-1.5 font-medium text-slate-800 disabled:bg-slate-100"
+                  />
+                </div>
+              </div>
+
+              <TaskCollaborators members={assignable} ownerId={assigneeId} selected={collaboratorIds} onChange={setCollaboratorIds} />
+            </fieldset>
+          )}
 
           <div>
             <label htmlFor="edit-task-desc" className="mb-1 block font-semibold text-slate-700">
-              รายละเอียด
+              เพิ่มเติม
             </label>
             <textarea
               id="edit-task-desc"
@@ -206,117 +551,6 @@ export function TaskDetailModal({ taskId, onClose }: TaskDetailModalProps) {
               onChange={(e) => setDescription(e.target.value)}
               className="w-full rounded-xl border border-slate-200 px-3 py-2 font-medium text-slate-800 disabled:bg-slate-100 disabled:text-slate-500"
             />
-          </div>
-
-          <div>
-            <label htmlFor="edit-task-milestone" className="mb-1 block font-semibold text-slate-700">
-              Milestone (ไม่บังคับ)
-            </label>
-            <select
-              id="edit-task-milestone"
-              value={
-                projectMilestones.some((milestone) => milestone.id === milestoneId)
-                  ? milestoneId
-                  : ''
-              }
-              disabled={!editable}
-              onChange={(e) => setMilestoneId(e.target.value)}
-              className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 font-medium text-slate-800 disabled:bg-slate-100 disabled:text-slate-500"
-            >
-              <option value="">ไม่เชื่อมกับ Milestone</option>
-              {projectMilestones.map((milestone) => (
-                <option key={milestone.id} value={milestone.id}>
-                  {milestone.title}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <div>
-              <label htmlFor="edit-task-assignee" className="mb-1 block font-semibold text-slate-700">
-                ผู้รับผิดชอบ
-              </label>
-              <select
-                id="edit-task-assignee"
-                value={assigneeId}
-                disabled={!editable || currentUser.role === 'staff'}
-                onChange={(e) => setAssigneeId(e.target.value)}
-                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 font-medium text-slate-800 disabled:bg-slate-100 disabled:text-slate-500"
-              >
-                <option value="">ยังไม่มอบหมาย</option>
-                {assigneeOptions.map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {u.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label htmlFor="edit-task-status" className="mb-1 block font-semibold text-slate-700">
-                สถานะ
-              </label>
-              <select
-                id="edit-task-status"
-                value={status}
-                disabled={!editable}
-                onChange={(e) => setStatus(e.target.value as TaskStatus)}
-                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 font-medium text-slate-800 disabled:bg-slate-100 disabled:text-slate-500"
-              >
-                <option value="todo">รอดำเนินการ</option>
-                <option value="in_progress">กำลังทำ</option>
-                <option value="review">รอตรวจสอบ (Review)</option>
-                <option value="completed">เสร็จสิ้น</option>
-              </select>
-            </div>
-
-            <div>
-              <label htmlFor="edit-task-priority" className="mb-1 block font-semibold text-slate-700">
-                ความสำคัญ
-              </label>
-              <select
-                id="edit-task-priority"
-                value={priority}
-                disabled={!editable}
-                onChange={(e) => setPriority(e.target.value as TaskPriority)}
-                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 font-medium text-slate-800 disabled:bg-slate-100 disabled:text-slate-500"
-              >
-                <option value="low">ต่ำ</option>
-                <option value="medium">ปานกลาง</option>
-                <option value="high">สูง</option>
-                <option value="urgent">ด่วนที่สุด</option>
-              </select>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 sm:grid-cols-2">
-            <div>
-              <label htmlFor="edit-task-start" className="mb-1 block font-semibold text-slate-700">
-                วันเริ่มต้น
-              </label>
-              <input
-                id="edit-task-start"
-                type="date"
-                value={startDate}
-                disabled={!editable}
-                onChange={(e) => setStartDate(e.target.value)}
-                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-1.5 font-medium text-slate-800 disabled:bg-slate-100"
-              />
-            </div>
-            <div>
-              <label htmlFor="edit-task-due" className="mb-1 block font-semibold text-slate-700">
-                วันกำหนดส่ง {durationDays > 0 ? `(${durationDays} วัน)` : ''}
-              </label>
-              <input
-                id="edit-task-due"
-                type="date"
-                value={dueDate}
-                disabled={!editable}
-                onChange={(e) => setDueDate(e.target.value)}
-                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-1.5 font-medium text-slate-800 disabled:bg-slate-100"
-              />
-            </div>
           </div>
 
           {canApprove && (
@@ -347,68 +581,102 @@ export function TaskDetailModal({ taskId, onClose }: TaskDetailModalProps) {
           )}
 
           {/* Footer Save / Delete */}
-          <div className="flex items-center justify-between border-t border-slate-100 pt-3">
-            {deletable ? (
-              confirmingDelete ? (
-                <div className="flex items-center gap-2">
-                  <span className="font-semibold text-rose-600">
-                    ยืนยันลบงานนี้?
-                    {task.milestoneId && ' Milestone ที่เชื่อมอยู่จะถูกลบไปพร้อมกัน'}
-                  </span>
+          {(!isStaff || editable) && (
+            <div className="flex items-center justify-between border-t border-slate-100 pt-3">
+              {deletable ? (
+                confirmingDelete ? (
+                  <div className="flex items-center gap-2">
+                    <span className="font-semibold text-rose-600">
+                      ยืนยันลบงานนี้?
+                      {task.milestoneId && ' Milestone ที่เชื่อมอยู่จะถูกลบไปพร้อมกัน'}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleDelete}
+                      className="rounded-lg bg-rose-600 px-2.5 py-1 font-bold text-white hover:bg-rose-700"
+                    >
+                      ลบเลย
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmingDelete(false)}
+                      className="rounded-lg border border-slate-200 px-2 py-1 text-slate-600"
+                    >
+                      ยกเลิก
+                    </button>
+                  </div>
+                ) : (
                   <button
                     type="button"
-                    onClick={handleDelete}
-                    className="rounded-lg bg-rose-600 px-2.5 py-1 font-bold text-white hover:bg-rose-700"
+                    onClick={() => setConfirmingDelete(true)}
+                    className="inline-flex items-center gap-1 font-semibold text-rose-600 hover:underline"
                   >
-                    ลบเลย
+                    <Trash2 className="h-3.5 w-3.5" />
+                    <span>ลบงานนี้</span>
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => setConfirmingDelete(false)}
-                    className="rounded-lg border border-slate-200 px-2 py-1 text-slate-600"
-                  >
-                    ยกเลิก
-                  </button>
-                </div>
+                )
               ) : (
-                <button
-                  type="button"
-                  onClick={() => setConfirmingDelete(true)}
-                  className="inline-flex items-center gap-1 font-semibold text-rose-600 hover:underline"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                  <span>ลบงานนี้</span>
-                </button>
-              )
-            ) : (
-              <span />
-            )}
-
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={onClose}
-                className="rounded-xl border border-slate-200 px-4 py-2 font-semibold text-slate-600 hover:bg-slate-50"
-              >
-                ปิด
-              </button>
-              {editable && (
-                <button
-                  type="submit"
-                  className="rounded-xl bg-indigo-600 px-5 py-2 font-semibold text-white shadow-sm hover:bg-indigo-700"
-                >
-                  บันทึกการแก้ไข
-                </button>
+                <span />
               )}
+  
+              <div className="flex items-center gap-2">
+                {!isStaff && (
+                  <button
+                    type="button"
+                    onClick={onClose}
+                  className="rounded-xl border border-slate-200 px-4 py-2 font-semibold text-slate-600 hover:bg-slate-50"
+                >
+                  ปิด
+                  </button>
+                )}
+                {editable && (
+                  <button
+                    type="submit"
+                    className="rounded-xl bg-indigo-600 px-5 py-2 font-semibold text-white shadow-sm hover:bg-indigo-700"
+                  >
+                    บันทึกการแก้ไข
+                  </button>
+                )}
+              </div>
             </div>
-          </div>
+          )}
         </form>
 
         {/* Comments Section */}
+        {!!task.collaboratorIds?.length && (
+          <section className="space-y-3 border-t border-slate-200 pt-4">
+            <h4 className="font-bold text-slate-800">รายละเอียดเพิ่มเติมของผู้ร่วมงาน</h4>
+            {task.collaboratorIds.map(id => {
+              const detail = task.collaboratorDetails?.[id] ?? '';
+              const name = users.find(user => user.id === id)?.name ?? id;
+              return id === currentUser.id && task.status !== 'completed' ? (
+                <form key={task.id + id} className="space-y-2" onSubmit={event => {
+                  event.preventDefault();
+                  const value = new FormData(event.currentTarget).get('detail');
+                  if (typeof value === 'string') void saveCollaboratorDetail(task.id, value);
+                }}>
+                  <label htmlFor="collaborator-detail" className="font-semibold">รายละเอียดเพิ่มเติมของฉัน</label>
+                  <textarea id="collaborator-detail" name="detail" defaultValue={detail} rows={3}
+                    placeholder="ระบุส่วนที่รับผิดชอบและความคืบหน้า"
+                    className="block w-full rounded-xl border border-slate-200 p-3" />
+                  <button type="submit" className="rounded-xl bg-indigo-600 px-4 py-2 font-semibold text-white">บันทึกรายละเอียดของฉัน</button>
+                </form>
+              ) : (
+                <div key={id} className="rounded-xl bg-slate-50 p-3">
+                  <p className="font-semibold">{name}</p>
+                  <p className="mt-1 whitespace-pre-wrap break-words text-slate-600">{detail || 'ยังไม่ได้ระบุรายละเอียด'}</p>
+                </div>
+              );
+            })}
+          </section>
+        )}
+
+        </>}
+        {(task.status !== 'completed' || completedTab === 'comments') && (
         <div className="space-y-3 border-t border-slate-200 pt-4">
           <h4 className="flex items-center gap-2 font-bold text-slate-800">
             <MessageSquare className="h-4 w-4 text-indigo-500" />
-            <span>ความคิดเห็น &amp; แนบลิงก์ส่งงาน ({task.comments.length})</span>
+            <span>ความคิด</span>
           </h4>
 
           <div className="max-h-40 space-y-2 overflow-y-auto pr-1">
@@ -455,6 +723,7 @@ export function TaskDetailModal({ taskId, onClose }: TaskDetailModalProps) {
                         ),
                       )}
                     </p>
+                    {comment.image && <a href={comment.image} target="_blank" rel="noopener noreferrer"><img src={comment.image} alt="ภาพประกอบการส่งงาน" className="ml-7 mt-2 max-h-48 max-w-full rounded-lg object-contain" /></a>}
                   </div>
                 );
               })
@@ -487,6 +756,7 @@ export function TaskDetailModal({ taskId, onClose }: TaskDetailModalProps) {
             </div>
           )}
         </div>
+        )}
       </div>
     </Modal>
   );

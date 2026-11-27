@@ -1,5 +1,7 @@
 node_modules/
 dist/
+.env.local
+.taskflow-notifications/
 .superpowers/
 .worktrees/
 *.local

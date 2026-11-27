@@ -1,3 +1,4 @@
+import { participatesInTask } from '../domain/rbac';
 import { Link } from 'react-router-dom';
 import {
   FolderOpen,
@@ -28,7 +29,7 @@ export function DashboardPage({ onOpenTaskDetail }: DashboardPageProps) {
   const completedTasks = visibleTasks.filter((t) => t.status === 'completed');
   const reviewTasks = visibleTasks.filter((t) => t.status === 'review');
   const overdueTasks = visibleTasks.filter((t) => isTaskOverdue(t, todayStr));
-  const myTasks = visibleTasks.filter((t) => t.assigneeId === currentUser.id);
+  const myTasks = visibleTasks.filter((t) => participatesInTask(t, currentUser.id));
   const urgentQueue = visibleTasks
     .filter((t) => t.status === 'review' || isTaskOverdue(t, todayStr))
     .slice(0, 6);
@@ -153,7 +154,7 @@ export function DashboardPage({ onOpenTaskDetail }: DashboardPageProps) {
                             className="h-2 w-2 shrink-0 rounded-full"
                             style={{ backgroundColor: prj?.color ?? '#94a3b8' }}
                           />
-                          <h4 className="truncate text-sm font-semibold text-slate-800">
+                          <h4 className="min-w-0 break-words text-sm font-semibold leading-relaxed text-slate-800">
                             {task.title}
                           </h4>
                         </div>
@@ -207,7 +208,7 @@ export function DashboardPage({ onOpenTaskDetail }: DashboardPageProps) {
                         <span className="text-[10px] font-bold uppercase text-slate-400">
                           {prj?.name ?? ''}
                         </span>
-                        <h5 className="truncate text-sm font-semibold text-slate-800">
+                        <h5 className="break-words text-sm font-semibold leading-relaxed text-slate-800">
                           {task.title}
                         </h5>
                         <p className="text-xs text-slate-500">

@@ -5,6 +5,7 @@ export type TaskPriority = 'low' | 'medium' | 'high' | 'urgent';
 export interface User {
   id: string;
   name: string;
+  excelAlias?: string;
   email: string;
   password?: string;
   role: UserRole;
@@ -26,6 +27,7 @@ export interface TaskComment {
   userId: string;
   text: string;
   createdAt: string;
+  image?: string;
 }
 
 export interface Task {
@@ -33,21 +35,28 @@ export interface Task {
   projectId: string;
   milestoneId?: string;
   title: string;
+  module?: string;
+  feature?: string;
   description: string;
   assigneeId: string;
+  collaboratorIds?: string[];
   status: TaskStatus;
   priority: TaskPriority;
   startDate: string;
   dueDate: string;
   createdAt: string;
   comments: TaskComment[];
+  collaboratorDetails?: Record<string, string>;
 }
 
 export interface CreateTaskInput {
   projectId: string;
   title: string;
+  module?: string;
+  feature?: string;
   description: string;
   assigneeId: string;
+  collaboratorIds?: string[];
   priority: TaskPriority;
   startDate: string;
   dueDate: string;
@@ -56,8 +65,11 @@ export interface CreateTaskInput {
 export interface UpdateTaskInput {
   milestoneId?: string | null;
   title?: string;
+  module?: string;
+  feature?: string;
   description?: string;
   assigneeId?: string;
+  collaboratorIds?: string[];
   status?: TaskStatus;
   priority?: TaskPriority;
   startDate?: string;
@@ -78,6 +90,36 @@ export interface UpdateProjectInput {
   color?: string;
   supervisorId?: string;
   memberIds?: string[];
+}
+
+export interface ImportProjectTaskInput {
+  title: string;
+  module?: string;
+  ownerName?: string;
+  assigneeId?: string;
+  collaboratorIds?: string[];
+  feature: string;
+  description: string;
+  status: TaskStatus;
+  startDate: string;
+  dueDate: string;
+}
+
+export interface ImportProjectInput {
+  name: string;
+  tasks: ImportProjectTaskInput[];
+}
+
+export interface ImportProjectsInput {
+  projects: ImportProjectInput[];
+  supervisorId: string;
+  sourceName: string;
+}
+
+export interface ImportProjectsResult {
+  projectCount: number;
+  taskCount: number;
+  skippedProjectNames: string[];
 }
 
 export interface CreateUserInput {

@@ -1,3 +1,4 @@
+import { participatesInTask } from '../domain/rbac';
 import { getTodayStr, isTaskOverdue } from '../domain/dates';
 import { useWorkspace } from '../state/WorkspaceContext';
 import { AvatarCircle, RoleBadge } from '../components/ui/Badges';
@@ -17,7 +18,7 @@ export function TeamWorkloadPage() {
   return (
     <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-4">
       {visibleTeamUsers.map((member) => {
-        const memberTasks = visibleTasks.filter((t) => t.assigneeId === member.id);
+        const memberTasks = visibleTasks.filter((t) => participatesInTask(t, member.id));
         const completed = memberTasks.filter((t) => t.status === 'completed').length;
         const inProgress = memberTasks.filter((t) => t.status === 'in_progress').length;
         const review = memberTasks.filter((t) => t.status === 'review').length;

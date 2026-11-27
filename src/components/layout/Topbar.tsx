@@ -1,3 +1,4 @@
+import { participatesInTask } from '../../domain/rbac';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
@@ -10,11 +11,14 @@ import {
   AlertTriangle,
   Folder,
   CheckCircle2,
+  Send,
 } from 'lucide-react';
 import { formatThaiDateFull, formatThaiDateShort, getTodayStr, isTaskOverdue } from '../../domain/dates';
-import { canAccessAdmin, canManageUsers } from '../../domain/rbac';
+import { canCreateTask, canAccessAdmin, canManageUsers } from '../../domain/rbac';
 import { useAuth } from '../../state/AuthContext';
 import { useWorkspace } from '../../state/WorkspaceContext';
+import { useToast } from '../../state/ToastContext';
+import { requestTelegramSettings } from '../../services/telegramSettings';
 
 interface TopbarProps {
   hasSubPanelRoute: boolean;
@@ -37,6 +41,23 @@ export function Topbar({
   const { visibleProjects, visibleTasks, users } = useWorkspace();
   const location = useLocation();
   const navigate = useNavigate();
+  const { showToast } = useToast();
+  const [testingTelegram, setTestingTelegram] = useState(false);
+
+  async function testTelegram() {
+    if (!currentUser) return;
+    setTestingTelegram(true);
+    try {
+      const { result } = await requestTelegramSettings(currentUser.id, 'test');
+      if (result === 'accepted') showToast('Telegram ตอบรับข้อความทดสอบแล้ว ลองเปิดแชตกับบอต', 'success');
+      else if (result === 'unconfigured') showToast('บัญชีนี้ยังไม่ได้ตั้งค่า Telegram', 'warning');
+      else showToast('ส่งข้อความทดสอบไป Telegram ไม่สำเร็จ', 'error');
+    } catch {
+      showToast('ติดต่อระบบแจ้งเตือนไม่ได้', 'error');
+    } finally {
+      setTestingTelegram(false);
+    }
+  }
 
   const [query, setQuery] = useState('');
   const [searchFocused, setSearchFocused] = useState(false);
@@ -152,7 +173,7 @@ export function Topbar({
     currentUser.role === 'executive';
   const reviewTasks = visibleTasks.filter((t) => t.status === 'review');
   const myOverdueCount = visibleTasks.filter(
-    (t) => t.assigneeId === currentUser.id && isTaskOverdue(t, todayStr),
+    (t) => participatesInTask(t, currentUser.id) && isTaskOverdue(t, todayStr),
   ).length;
 
   const currentProjectId = location.pathname.startsWith('/projects/')
@@ -356,16 +377,31 @@ export function Topbar({
           <span>วันนี้: {formatThaiDateFull(todayStr)}</span>
         </div>
 
-        {/* Quick Create Task Button */}
         <button
           type="button"
-          disabled={visibleProjects.length === 0}
-          onClick={() => onOpenCreateTask({ projectId: currentProjectId })}
-          className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm shadow-indigo-600/20 transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-40"
+          onClick={() => void testTelegram()}
+          disabled={testingTelegram}
+          title="ทดสอบ Telegram"
+          aria-label="ทดสอบ Telegram"
+          aria-busy={testingTelegram}
+          className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-50"
         >
-          <Plus className="h-3.5 w-3.5" />
-          <span className="hidden sm:inline">สร้างงาน</span>
+          <Send className="h-3.5 w-3.5" />
+          <span className="hidden lg:inline">{testingTelegram ? 'กำลังส่ง…' : 'ทดสอบ Telegram'}</span>
         </button>
+
+        {/* Quick Create Task Button */}
+        {canCreateTask(currentUser) && (
+          <button
+            type="button"
+            disabled={visibleProjects.length === 0}
+            onClick={() => onOpenCreateTask({ projectId: currentProjectId })}
+            className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm shadow-indigo-600/20 transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">สร้างงาน</span>
+          </button>
+        )}
       </div>
     </header>
   );

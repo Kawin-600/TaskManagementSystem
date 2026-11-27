@@ -16,6 +16,7 @@ import { useAuth } from '../../state/AuthContext';
 import { useWorkspace } from '../../state/WorkspaceContext';
 import type { Project, Task, TaskStatus } from '../../types/models';
 import { AvatarCircle, PriorityBadge } from '../ui/Badges';
+import { TaskModuleGroups } from './TaskModuleGroups';
 
 interface KanbanBoardProps {
   project: Project;
@@ -62,7 +63,7 @@ const COLUMNS: Array<{
 
 export function KanbanBoard({ project, tasks, onTaskClick }: KanbanBoardProps) {
   const { currentUser } = useAuth();
-  const { users, moveTaskStatus, approveTask, rejectTask } = useWorkspace();
+  const { users, moveTaskStatus, approveTask } = useWorkspace();
   const [dragOverCol, setDragOverCol] = useState<TaskStatus | null>(null);
   const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null);
 
@@ -75,6 +76,7 @@ export function KanbanBoard({ project, tasks, onTaskClick }: KanbanBoardProps) {
   };
 
   const handleDragOver = (e: DragEvent<HTMLDivElement>, status: TaskStatus) => {
+    if (currentUser.role === 'executive') return;
     e.preventDefault();
     setDragOverCol(status);
   };
@@ -88,12 +90,16 @@ export function KanbanBoard({ project, tasks, onTaskClick }: KanbanBoardProps) {
     setDragOverCol(null);
     const id = draggedTaskId || e.dataTransfer?.getData('text/plain');
     setDraggedTaskId(null);
-    if (!id) return;
+    if (!id || currentUser.role === 'executive') return;
+    if (tasks.find((task) => task.id === id)?.status === 'review' && newStatus === 'in_progress') {
+      onTaskClick(id);
+      return;
+    }
     await moveTaskStatus(id, newStatus);
   };
 
   return (
-    <div className="grid grid-cols-1 items-start gap-4 md:grid-cols-2 xl:grid-cols-4">
+    <div className="grid grid-cols-1 items-stretch gap-4 md:grid-cols-2 xl:grid-cols-4">
       {COLUMNS.map(({ id, title, Icon, iconColor, badgeStyle }) => {
         const colTasks = tasks.filter((t) => t.status === id);
         const isOver = dragOverCol === id;
@@ -105,7 +111,7 @@ export function KanbanBoard({ project, tasks, onTaskClick }: KanbanBoardProps) {
             onDragOver={(e) => handleDragOver(e, id)}
             onDragLeave={handleDragLeave}
             onDrop={(e) => handleDrop(e, id)}
-            className={`kanban-col flex min-h-[460px] flex-col rounded-2xl border border-slate-200/80 bg-slate-100/80 p-3.5 transition ${
+            className={`kanban-col flex min-h-[460px] min-w-0 flex-col rounded-2xl border border-slate-200/80 bg-slate-100/80 p-3.5 transition ${
               isOver ? 'drag-over' : ''
             }`}
           >
@@ -127,10 +133,10 @@ export function KanbanBoard({ project, tasks, onTaskClick }: KanbanBoardProps) {
                   ไม่มีงานในสถานะนี้
                 </div>
               ) : (
-                colTasks.map((task) => {
+                <TaskModuleGroups tasks={colTasks} progressTasks={tasks} renderTask={(task) => {
                   const assignee = users.find((u) => u.id === task.assigneeId);
                   const overdue = isTaskOverdue(task, todayStr);
-                  const draggable = canEditTask(currentUser, task, project);
+                  const draggable = currentUser.role !== 'executive' && canEditTask(currentUser, task, project);
                   const showApproveControls = canApproveOrRejectTask(currentUser, task, project);
                   const lockedForStaff = currentUser.role === 'staff' && task.status === 'completed';
 
@@ -146,20 +152,27 @@ export function KanbanBoard({ project, tasks, onTaskClick }: KanbanBoardProps) {
                         }
                         handleDragStart(e, task.id);
                       }}
+                      onDragEnd={() => { setDraggedTaskId(null); setDragOverCol(null); }}
                       onClick={() => onTaskClick(task.id)}
-                      className={`group space-y-2.5 rounded-xl border border-slate-200/90 bg-white p-3.5 shadow-sm transition hover:border-indigo-200 hover:shadow-md ${
+                      className={`group space-y-2.5 bg-white p-3.5 transition hover:bg-slate-50 ${
                         draggable ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'
                       }`}
                     >
-                      <div className="flex items-start justify-between gap-2">
-                        <h5 className="text-sm font-semibold leading-snug text-slate-800 group-hover:text-indigo-600">
+                      <div className="flex min-w-0 items-start justify-between gap-2">
+                        <h5 className="min-w-0 flex-1 break-words text-sm font-semibold leading-relaxed text-slate-800 group-hover:text-indigo-600">
                           {task.title}
                         </h5>
-                        <PriorityBadge priority={task.priority} />
+                        <span className="shrink-0"><PriorityBadge priority={task.priority} /></span>
                       </div>
 
+                      {(task.module?.trim() || task.feature?.trim()) && (
+                        <div className="space-y-1 text-xs leading-relaxed text-slate-600">
+                          {task.feature?.trim() && task.feature.trim() !== task.title.trim() && <p className="break-words"><span className="text-slate-400">Feature: </span>{task.feature}</p>}
+                        </div>
+                      )}
+
                       {task.description && (
-                        <p className="line-clamp-2 text-xs text-slate-500">{task.description}</p>
+                        <p className="line-clamp-2 break-words text-xs leading-relaxed text-slate-500">{task.description}</p>
                       )}
 
                       <div className="flex items-center justify-between text-xs text-slate-400">
@@ -169,7 +182,7 @@ export function KanbanBoard({ project, tasks, onTaskClick }: KanbanBoardProps) {
                           }`}
                         >
                           <Calendar className="h-3.5 w-3.5" />
-                          {formatThaiDateShort(task.dueDate)}
+                          {formatThaiDateShort(task.startDate)} – {formatThaiDateShort(task.dueDate)}
                         </span>
                         <div className="flex items-center gap-1.5">
                           {lockedForStaff && (
@@ -204,7 +217,7 @@ export function KanbanBoard({ project, tasks, onTaskClick }: KanbanBoardProps) {
                           </button>
                           <button
                             type="button"
-                            onClick={() => rejectTask(task.id)}
+                            onClick={() => onTaskClick(task.id)}
                             className="inline-flex flex-1 items-center justify-center gap-1 rounded-lg bg-rose-600 py-1.5 text-xs font-semibold text-white transition hover:bg-rose-700"
                           >
                             <RotateCcw className="h-3.5 w-3.5" />
@@ -233,7 +246,7 @@ export function KanbanBoard({ project, tasks, onTaskClick }: KanbanBoardProps) {
                       </div>
                     </div>
                   );
-                })
+                }} />
               )}
             </div>
           </div>

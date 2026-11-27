@@ -170,6 +170,7 @@ export function RoadmapPhaseBoard({
 
               {phases.map(({ phase, milestones: phaseMilestones }) => {
                 const key = `${project.id}-${phase}`;
+                const phaseProgress = getProjectProgress(phaseMilestones);
                 return (
                   <div
                     key={key}
@@ -200,8 +201,76 @@ export function RoadmapPhaseBoard({
                       </div>
                     </div>
 
-                    <div className="flex flex-1 flex-col gap-2.5">
-                      {phaseMilestones.map((m) => renderMilestoneCard(m, manageable))}
+                    <div
+                      data-testid={`phase-group-${project.id}-${phase}`}
+                      className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm"
+                    >
+                      <div className="border-b border-slate-100 p-3">
+                        <div className="mb-1.5 flex items-center justify-between text-[11px] font-bold">
+                          <span className="text-slate-500">ความคืบหน้า Phase {phase}</span>
+                          <span
+                            data-testid={`phase-progress-${project.id}-${phase}`}
+                            className="text-indigo-600"
+                          >
+                            {phaseProgress}%
+                          </span>
+                        </div>
+                        <div className="h-1.5 overflow-hidden rounded-full bg-slate-100">
+                          <div
+                            className="h-full rounded-full bg-indigo-500 transition-all"
+                            style={{ width: `${phaseProgress}%` }}
+                          />
+                        </div>
+                      </div>
+
+                      <div className="divide-y divide-slate-100">
+                        {phaseMilestones.map((m) => {
+                          const status = getMilestoneStatus(m, todayStr);
+                          const styles = MILESTONE_STATUS_STYLES[status];
+                          return (
+                            <div
+                              key={m.id}
+                              data-testid={`phase-card-${m.id}`}
+                              data-phase={m.phase ?? ''}
+                              draggable={manageable}
+                              onDragStart={(e) => {
+                                if (!manageable) {
+                                  e.preventDefault();
+                                  return;
+                                }
+                                setDraggedId(m.id);
+                                e.dataTransfer?.setData('text/plain', m.id);
+                              }}
+                              onDragEnd={() => {
+                                setDraggedId(null);
+                                setDragOverKey(null);
+                              }}
+                              onClick={() => manageable && onMilestoneClick(m)}
+                              className={`p-3 text-xs transition ${
+                                manageable
+                                  ? 'cursor-grab hover:bg-indigo-50 active:cursor-grabbing'
+                                  : ''
+                              } ${draggedId === m.id ? 'opacity-50' : ''}`}
+                            >
+                              <div className="flex items-start justify-between gap-2">
+                                <p className="font-bold leading-snug text-slate-800">{m.title}</p>
+                                <span
+                                  className={`shrink-0 whitespace-nowrap rounded-full border px-2 py-0.5 text-[10px] font-bold ${styles.badge}`}
+                                >
+                                  {MILESTONE_STATUS_LABELS[status]}
+                                </span>
+                              </div>
+                              <p className="mt-1.5 flex items-center gap-1 text-[11px] text-slate-500">
+                                <CalendarIcon className="h-3 w-3" />
+                                {formatThaiDateShort(m.startDate)} – {formatThaiDateShort(m.endDate)}
+                              </p>
+                              <p className="mt-1 text-[11px] text-slate-400">
+                                ผู้ดูแล: {userNames.get(m.ownerId) ?? '-'}
+                              </p>
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
                   </div>
                 );

@@ -1,7 +1,8 @@
+import { TaskCollaborators } from './TaskCollaborators';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Clock, AlertCircle } from 'lucide-react';
 import { addDays, calculateDaysBetween, getTodayStr } from '../../domain/dates';
-import { getAssignableMembers } from '../../domain/rbac';
+import { canCreateTask, canSetTaskPriority, getAssignableMembers } from '../../domain/rbac';
 import { useAuth } from '../../state/AuthContext';
 import { useWorkspace } from '../../state/WorkspaceContext';
 import type { TaskPriority } from '../../types/models';
@@ -27,7 +28,10 @@ export function CreateTaskModal({
 
   const [projectId, setProjectId] = useState(defaultProjectId ?? '');
   const [title, setTitle] = useState('');
+  const [module, setModule] = useState('');
+  const [feature, setFeature] = useState('');
   const [description, setDescription] = useState('');
+  const [collaboratorIds, setCollaboratorIds] = useState<string[]>([]);
   const [assigneeId, setAssigneeId] = useState('');
   const [priority, setPriority] = useState<TaskPriority>('medium');
   const [startDate, setStartDate] = useState(defaultStartDate || getTodayStr());
@@ -39,8 +43,11 @@ export function CreateTaskModal({
     const baseStart = defaultStartDate || getTodayStr();
     setProjectId(defaultProjectId ?? '');
     setTitle('');
+    setModule('');
+    setFeature('');
     setDescription('');
     setAssigneeId('');
+    setCollaboratorIds([]);
     setPriority('medium');
     setStartDate(baseStart);
     setDueDate(addDays(baseStart, 4));
@@ -71,7 +78,7 @@ export function CreateTaskModal({
           ? ''
           : assignableMembers[0]?.id ?? '';
 
-  if (!currentUser) return null;
+  if (!currentUser || !canCreateTask(currentUser)) return null;
 
   const isInvalidDates = Boolean(startDate && dueDate && dueDate < startDate);
   const durationDays = isInvalidDates ? 0 : calculateDaysBetween(startDate, dueDate);
@@ -100,8 +107,11 @@ export function CreateTaskModal({
     const created = await createTask({
       projectId: effectiveProjectId,
       title: title.trim(),
+      module: module.trim(),
+      feature: feature.trim(),
       description: description.trim(),
       assigneeId: effectiveAssigneeId,
+      collaboratorIds,
       priority,
       startDate,
       dueDate,
@@ -131,7 +141,7 @@ export function CreateTaskModal({
           <select
             id="create-task-project"
             value={effectiveProjectId}
-            onChange={(e) => setProjectId(e.target.value)}
+            onChange={(e) => { setProjectId(e.target.value); setCollaboratorIds([]); }}
             className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 font-medium text-slate-800 outline-none focus:border-indigo-500 focus:bg-white"
           >
             {visibleProjects.map((p) => (
@@ -144,7 +154,7 @@ export function CreateTaskModal({
 
         <div>
           <label htmlFor="create-task-title" className="mb-1 block font-semibold text-slate-700">
-            หัวข้องาน *
+            Task *
           </label>
           <input
             id="create-task-title"
@@ -156,13 +166,32 @@ export function CreateTaskModal({
           />
         </div>
 
+        <div>
+          <label htmlFor="create-task-module" className="mb-1 block font-semibold text-slate-700">Module</label>
+          <input id="create-task-module" value={module} onChange={(e) => setModule(e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-slate-800" />
+        </div>
+
+        <div>
+          <label htmlFor="create-task-feature" className="mb-1 block font-semibold text-slate-700">
+            Feature
+          </label>
+          <input
+            id="create-task-feature"
+            type="text"
+            value={feature}
+            onChange={(e) => setFeature(e.target.value)}
+            placeholder="เช่น สมัครใช้งาน หรือ หน้าการเงิน"
+            className="w-full rounded-xl border border-slate-200 px-3 py-2 font-medium text-slate-800 outline-none focus:border-indigo-500"
+          />
+        </div>
+
         <p className="rounded-xl border border-indigo-100 bg-indigo-50/60 px-3 py-2 text-[11px] leading-relaxed text-indigo-800">
           เมื่อสร้างงาน ระบบจะสร้าง Milestone ชื่อเดียวกันและวางไว้ใน “ยังไม่จัด Phase” เพื่อให้ย้ายไป Phase ที่ต้องการได้ทันที
         </p>
 
         <div>
           <label htmlFor="create-task-desc" className="mb-1 block font-semibold text-slate-700">
-            รายละเอียดงาน
+            เพิ่มเติม
           </label>
           <textarea
             id="create-task-desc"
@@ -177,7 +206,7 @@ export function CreateTaskModal({
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
             <label htmlFor="create-task-assignee" className="mb-1 block font-semibold text-slate-700">
-              {defaultUnassigned ? 'ผู้รับผิดชอบ' : 'ผู้รับผิดชอบ *'}
+              {defaultUnassigned ? 'ผู้รับผิดชอบหลัก' : 'ผู้รับผิดชอบหลัก *'}
             </label>
             <select
               id="create-task-assignee"
@@ -213,6 +242,7 @@ export function CreateTaskModal({
             </label>
             <select
               id="create-task-priority"
+              disabled={!canSetTaskPriority(currentUser)}
               value={priority}
               onChange={(e) => setPriority(e.target.value as TaskPriority)}
               className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 font-medium text-slate-800"
@@ -225,6 +255,7 @@ export function CreateTaskModal({
           </div>
         </div>
 
+        <TaskCollaborators members={assignableMembers} ownerId={effectiveAssigneeId} selected={collaboratorIds} onChange={setCollaboratorIds} />
         <div className="space-y-3 rounded-xl border border-indigo-100 bg-indigo-50/60 p-3.5">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>

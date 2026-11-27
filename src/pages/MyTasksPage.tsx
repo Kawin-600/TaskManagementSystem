@@ -1,3 +1,5 @@
+import { participatesInTask } from '../domain/rbac';
+import { canCreateTask } from '../domain/rbac';
 import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Calendar, Plus, Filter } from 'lucide-react';
@@ -49,7 +51,7 @@ export function MyTasksPage({ onOpenTaskDetail, onOpenCreateTask }: MyTasksPageP
 
   const todayStr = getTodayStr();
   const myTasks = useMemo(
-    () => (currentUser ? visibleTasks.filter((t) => t.assigneeId === currentUser.id) : []),
+    () => (currentUser ? visibleTasks.filter((t) => participatesInTask(t, currentUser.id)) : []),
     [currentUser, visibleTasks],
   );
 
@@ -69,6 +71,17 @@ export function MyTasksPage({ onOpenTaskDetail, onOpenCreateTask }: MyTasksPageP
         return a.dueDate.localeCompare(b.dueDate);
       });
   }, [myTasks, projectFilter, statusFilter, sortBy, todayStr]);
+
+  const groupedTasks = useMemo(() => {
+    const groups = new Map<string, typeof filteredTasks>();
+    for (const task of filteredTasks) {
+      const key = JSON.stringify([task.projectId, (task.module?.trim() || '').toLocaleLowerCase()]);
+      const group = groups.get(key) ?? [];
+      group.push(task);
+      groups.set(key, group);
+    }
+    return [...groups.entries()];
+  }, [filteredTasks]);
 
   if (!currentUser) return null;
 
@@ -125,15 +138,17 @@ export function MyTasksPage({ onOpenTaskDetail, onOpenCreateTask }: MyTasksPageP
             ))}
           </div>
 
-          <button
-            type="button"
-            disabled={visibleProjects.length === 0}
-            onClick={() => onOpenCreateTask()}
-            className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-3.5 py-2 text-xs font-semibold text-white shadow-sm hover:bg-indigo-700 disabled:opacity-40"
-          >
-            <Plus className="h-3.5 w-3.5" />
-            <span>เพิ่มงานใหม่</span>
-          </button>
+          {canCreateTask(currentUser) && (
+            <button
+              type="button"
+              disabled={visibleProjects.length === 0}
+              onClick={() => onOpenCreateTask()}
+              className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-3.5 py-2 text-xs font-semibold text-white shadow-sm hover:bg-indigo-700 disabled:opacity-40"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              <span>เพิ่มงานใหม่</span>
+            </button>
+          )}
         </div>
 
         <div className="flex flex-wrap items-center gap-3 border-t border-slate-100 pt-3 text-xs">
@@ -176,7 +191,14 @@ export function MyTasksPage({ onOpenTaskDetail, onOpenCreateTask }: MyTasksPageP
           </div>
         ) : (
           <div className="divide-y divide-slate-100">
-            {filteredTasks.map((task) => {
+            {groupedTasks.map(([key, group]) => (
+              <section key={key}>
+                <div className="flex flex-wrap items-center gap-2 bg-indigo-50 px-5 py-2.5 text-xs font-semibold text-indigo-900">
+                  <span>{group[0].module?.trim() || 'ไม่ได้ระบุ Module'}</span>
+                  <span className="font-normal text-indigo-600">{visibleProjects.find((p) => p.id === group[0].projectId)?.name ?? '-'} · {group.length} งาน</span>
+                </div>
+                <div className="divide-y divide-slate-100">
+            {group.map((task) => {
               const prj = visibleProjects.find((p) => p.id === task.projectId);
               const overdue = isTaskOverdue(task, todayStr);
               const days = calculateDaysBetween(task.startDate, task.dueDate);
@@ -195,7 +217,7 @@ export function MyTasksPage({ onOpenTaskDetail, onOpenCreateTask }: MyTasksPageP
                         style={{ backgroundColor: prj?.color ?? '#4f46e5' }}
                       />
                       <span
-                        className={`truncate text-sm font-semibold ${
+                        className={`min-w-0 break-words text-sm font-semibold leading-relaxed ${
                           overdue ? 'text-rose-600' : 'text-slate-800'
                         }`}
                       >
@@ -204,6 +226,7 @@ export function MyTasksPage({ onOpenTaskDetail, onOpenCreateTask }: MyTasksPageP
                     </div>
                     <div className="flex flex-wrap items-center gap-3 pl-4 text-xs text-slate-400">
                       <span>{prj?.name ?? '-'}</span>
+                      {task.feature?.trim() && task.feature.trim() !== task.title.trim() && <span>Feature: {task.feature}</span>}
                       <span className="flex items-center gap-1">
                         <Calendar className="h-3 w-3" />
                         {formatThaiDateShort(task.startDate)} - {formatThaiDateShort(task.dueDate)} (
@@ -223,6 +246,9 @@ export function MyTasksPage({ onOpenTaskDetail, onOpenCreateTask }: MyTasksPageP
                 </button>
               );
             })}
+                </div>
+              </section>
+            ))}
           </div>
         )}
       </div>

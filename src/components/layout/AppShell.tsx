@@ -6,6 +6,7 @@ import { useAuth } from '../../state/AuthContext';
 import { IconRail } from './IconRail';
 import { ContextualSubPanel } from './ContextualSubPanel';
 import { Topbar } from './Topbar';
+import { TaskAssistant } from './TaskAssistant';
 
 interface AppShellProps {
   onOpenCreateTask: (opts?: { projectId?: string; startDate?: string }) => void;
@@ -91,6 +92,9 @@ export function AppShell({
           <Outlet />
         </main>
       </div>
+      {currentUser && (
+        <TaskAssistant key={currentUser.id} userId={currentUser.id} onOpenTaskDetail={onOpenTaskDetail} />
+      )}
     </div>
   );
 }

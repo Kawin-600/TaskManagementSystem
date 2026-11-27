@@ -1,4 +1,4 @@
-import { STORAGE_KEYS } from '../config/appConfig';
+import { PROJECT_COLORS, STORAGE_KEYS } from '../config/appConfig';
 import { getTodayStr } from '../domain/dates';
 import { compactPhases, getPhaseCount, getPhaseNumbers } from '../domain/roadmap';
 import type {
@@ -6,6 +6,8 @@ import type {
   CreateProjectInput,
   CreateTaskInput,
   CreateUserInput,
+  ImportProjectsInput,
+  ImportProjectsResult,
   Milestone,
   Project,
   Task,
@@ -26,6 +28,7 @@ export interface WorkspaceSnapshot {
 
 export interface WorkspaceRepository {
   loadAll(): Promise<WorkspaceSnapshot>;
+  updateExcelAlias?(userId: string, alias: string): Promise<void>;
   createProject(input: CreateProjectInput): Promise<Project>;
   updateProject(projectId: string, input: UpdateProjectInput): Promise<Project>;
   updateProjectMembers(
@@ -33,10 +36,14 @@ export interface WorkspaceRepository {
     memberIds: string[],
   ): Promise<{ project: Project; reassignedTaskCount: number }>;
   deleteProject(projectId: string): Promise<void>;
+  importProjects(input: ImportProjectsInput): Promise<ImportProjectsResult>;
   createTask(input: CreateTaskInput): Promise<Task>;
   updateTask(taskId: string, input: UpdateTaskInput): Promise<Task>;
   deleteTask(taskId: string): Promise<void>;
   addComment(taskId: string, userId: string, text: string): Promise<Task>;
+  submitTask(taskId: string, userId: string, text: string, image?: string): Promise<Task>;
+  returnTask(taskId: string, userId: string, reason: string, image?: string): Promise<Task>;
+  saveCollaboratorDetail(taskId: string, userId: string, text: string): Promise<void>;
   createMilestone(input: CreateMilestoneInput): Promise<Milestone>;
   updateMilestone(milestoneId: string, input: UpdateMilestoneInput): Promise<Milestone>;
   deleteMilestone(milestoneId: string): Promise<void>;
@@ -66,6 +73,10 @@ function dedupe(ids: string[]): string[] {
 
 function generateId(prefix: string): string {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+}
+
+function normalizeName(value: string): string {
+  return value.trim().toLocaleLowerCase();
 }
 
 const VALID_ROLES = new Set<string>(['admin', 'supervisor', 'executive', 'staff']);
@@ -108,8 +119,10 @@ function isValidTask(v: unknown): v is Task {
     typeof v.id === 'string' &&
     typeof v.projectId === 'string' &&
     typeof v.title === 'string' &&
+    (v.feature === undefined || typeof v.feature === 'string') &&
     typeof v.description === 'string' &&
     typeof v.assigneeId === 'string' &&
+    (v.collaboratorIds === undefined || (Array.isArray(v.collaboratorIds) && v.collaboratorIds.every(id => typeof id === 'string'))) &&
     typeof v.status === 'string' &&
     VALID_STATUSES.has(v.status) &&
     typeof v.priority === 'string' &&
@@ -203,6 +216,23 @@ function safeParseArray<T>(raw: string | null, guard: (item: unknown) => item is
   }
 }
 
+function syncMilestoneDates(snapshot: WorkspaceSnapshot): void {
+  const ranges = new Map<string, { startDate: string; endDate: string }>();
+  for (const task of snapshot.tasks) {
+    if (!task.milestoneId) continue;
+    const range = ranges.get(task.milestoneId);
+    if (!range) ranges.set(task.milestoneId, { startDate: task.startDate, endDate: task.dueDate });
+    else {
+      if (task.startDate < range.startDate) range.startDate = task.startDate;
+      if (task.dueDate > range.endDate) range.endDate = task.dueDate;
+    }
+  }
+  snapshot.milestones = snapshot.milestones.map((milestone) => {
+    const range = ranges.get(milestone.id);
+    return range ? { ...milestone, ...range } : milestone;
+  });
+}
+
 export class LocalStorageRepository implements WorkspaceRepository {
   private readonly getToday: () => string;
 
@@ -263,10 +293,20 @@ export class LocalStorageRepository implements WorkspaceRepository {
       localStorage.setItem(STORAGE_KEYS.milestones, JSON.stringify(milestones));
     }
 
-    return { users, projects, tasks, milestones };
+    const snapshot = { users, projects, tasks, milestones };
+    syncMilestoneDates(snapshot);
+    return snapshot;
   }
 
   private writeSnapshot(snapshot: WorkspaceSnapshot): void {
+    syncMilestoneDates(snapshot);
+    for (const task of snapshot.tasks) {
+      if (!task.collaboratorIds?.length) continue;
+      const project = snapshot.projects.find(p => p.id === task.projectId);
+      task.collaboratorIds = project && task.assigneeId
+        ? dedupe(task.collaboratorIds.filter(id => id !== task.assigneeId && isProjectPerson(project, id)))
+        : [];
+    }
     localStorage.setItem(STORAGE_KEYS.users, JSON.stringify(snapshot.users));
     localStorage.setItem(STORAGE_KEYS.projects, JSON.stringify(snapshot.projects));
     localStorage.setItem(STORAGE_KEYS.tasks, JSON.stringify(snapshot.tasks));
@@ -275,6 +315,13 @@ export class LocalStorageRepository implements WorkspaceRepository {
 
   async loadAll(): Promise<WorkspaceSnapshot> {
     return this.readSnapshot();
+  }
+
+  async updateExcelAlias(userId: string, alias: string): Promise<void> {
+    const snap = this.readSnapshot();
+    if (!snap.users.some((user) => user.id === userId)) throw new Error('ไม่พบผู้ใช้');
+    snap.users = snap.users.map((user) => user.id === userId ? { ...user, excelAlias: alias.trim() } : user);
+    this.writeSnapshot(snap);
   }
 
   async createProject(input: CreateProjectInput): Promise<Project> {
@@ -290,6 +337,84 @@ export class LocalStorageRepository implements WorkspaceRepository {
     snap.projects = [...snap.projects, project];
     this.writeSnapshot(snap);
     return project;
+  }
+
+  async importProjects(input: ImportProjectsInput): Promise<ImportProjectsResult> {
+    const snap = this.readSnapshot();
+    const existingNames = new Set(snap.projects.map((project) => project.name.trim().toLowerCase()));
+    const skippedProjectNames: string[] = [];
+    let projectCount = 0;
+    let taskCount = 0;
+
+    input.projects.forEach((importedProject, projectIndex) => {
+      const name = importedProject.name.trim();
+      if (!name || existingNames.has(name.toLowerCase())) {
+        if (name) skippedProjectNames.push(name);
+        return;
+      }
+      const project: Project = {
+        id: generateId('p'),
+        name,
+        description: `นำเข้าจาก Excel: ${input.sourceName}`,
+        color: PROJECT_COLORS[projectIndex % PROJECT_COLORS.length],
+        supervisorId: input.supervisorId,
+        memberIds: dedupe([input.supervisorId, ...importedProject.tasks.flatMap((task) => [task.assigneeId, ...(task.collaboratorIds ?? [])]).filter((id): id is string => Boolean(id && snap.users.some((user) => user.id === id)))]),
+      };
+      snap.projects.push(project);
+      existingNames.add(name.toLowerCase());
+      projectCount += 1;
+
+      importedProject.tasks.forEach((importedTask) => {
+        const normalizedTitle = normalizeName(importedTask.module || importedTask.title);
+        const existingMilestone = snap.milestones.find(
+          (milestone) => milestone.projectId === project.id && normalizeName(milestone.title) === normalizedTitle,
+        );
+        if (!normalizedTitle) return;
+        const milestoneId = existingMilestone?.id ?? generateId('m');
+        const taskId = generateId('t');
+        if (!existingMilestone) {
+          snap.milestones.push({
+            id: milestoneId,
+            projectId: project.id,
+            title: (importedTask.module || importedTask.title).trim(),
+            ownerId: input.supervisorId,
+            startDate: importedTask.startDate,
+            endDate: importedTask.dueDate,
+            progress: importedTask.status === 'completed' ? 100 : 0,
+            phase: null,
+            createdAt: this.getToday(),
+          });
+        }
+        snap.tasks.push({
+          id: taskId,
+          projectId: project.id,
+          milestoneId,
+          title: importedTask.title.trim(),
+          module: importedTask.module?.trim() ?? '',
+          feature: importedTask.feature.trim(),
+          description: importedTask.description.trim(),
+          assigneeId: project.memberIds.includes(importedTask.assigneeId ?? '') ? importedTask.assigneeId! : input.supervisorId,
+          collaboratorIds: dedupe(importedTask.collaboratorIds ?? []).filter((id) => project.memberIds.includes(id) && id !== (project.memberIds.includes(importedTask.assigneeId ?? '') ? importedTask.assigneeId : input.supervisorId)),
+          status: importedTask.status,
+          priority: 'medium',
+          startDate: importedTask.startDate,
+          dueDate: importedTask.dueDate,
+          createdAt: this.getToday(),
+          comments: [],
+        });
+        taskCount += 1;
+      });
+      snap.milestones = snap.milestones.map((milestone) => {
+        if (milestone.projectId !== project.id) return milestone;
+        const linkedTasks = snap.tasks.filter((task) => task.milestoneId === milestone.id);
+        if (linkedTasks.length === 0) return milestone;
+        const completedTasks = linkedTasks.filter((task) => task.status === 'completed').length;
+        return { ...milestone, progress: Math.round((completedTasks / linkedTasks.length) * 100) };
+      });
+    });
+
+    this.writeSnapshot(snap);
+    return { projectCount, taskCount, skippedProjectNames };
   }
 
   async updateProject(projectId: string, input: UpdateProjectInput): Promise<Project> {
@@ -361,10 +486,15 @@ export class LocalStorageRepository implements WorkspaceRepository {
   async createTask(input: CreateTaskInput): Promise<Task> {
     const snap = this.readSnapshot();
     const project = snap.projects.find((item) => item.id === input.projectId);
-    const milestone: Milestone = {
+    const normalizedTitle = normalizeName(input.module?.trim() || input.title);
+    const existingMilestone = snap.milestones.find(
+      (milestone) =>
+        milestone.projectId === input.projectId && normalizeName(milestone.title) === normalizedTitle,
+    );
+    const milestone: Milestone = existingMilestone ?? {
       id: generateId('m'),
       projectId: input.projectId,
-      title: input.title.trim(),
+      title: (input.module?.trim() || input.title).trim(),
       ownerId: input.assigneeId || project?.supervisorId || '',
       startDate: input.startDate,
       endDate: input.dueDate,
@@ -372,14 +502,17 @@ export class LocalStorageRepository implements WorkspaceRepository {
       phase: null,
       createdAt: this.getToday(),
     };
-    assertValidMilestone(milestone, project);
+    if (!existingMilestone) assertValidMilestone(milestone, project);
     const task: Task = {
       id: generateId('t'),
       projectId: input.projectId,
       milestoneId: milestone.id,
       title: input.title.trim(),
+      module: input.module?.trim() ?? '',
+      feature: input.feature?.trim() ?? '',
       description: input.description.trim(),
       assigneeId: input.assigneeId,
+      collaboratorIds: input.collaboratorIds ?? [],
       status: 'todo',
       priority: input.priority,
       startDate: input.startDate,
@@ -388,7 +521,15 @@ export class LocalStorageRepository implements WorkspaceRepository {
       comments: [],
     };
     snap.tasks = [...snap.tasks, task];
-    snap.milestones = [...snap.milestones, milestone];
+    if (!existingMilestone) snap.milestones = [...snap.milestones, milestone];
+    else {
+      const linkedTasks = snap.tasks.filter((linkedTask) => linkedTask.milestoneId === milestone.id);
+      const completedTasks = linkedTasks.filter((linkedTask) => linkedTask.status === 'completed').length;
+      const progress = Math.round((completedTasks / linkedTasks.length) * 100);
+      snap.milestones = snap.milestones.map((item) =>
+        item.id === milestone.id ? { ...item, progress } : item,
+      );
+    }
     this.writeSnapshot(snap);
     return task;
   }
@@ -410,8 +551,11 @@ export class LocalStorageRepository implements WorkspaceRepository {
           : { milestoneId: undefined }
         : {}),
       title: input.title !== undefined ? input.title.trim() : existing.title,
+      module: input.module !== undefined ? input.module.trim() : existing.module,
+      feature: input.feature !== undefined ? input.feature.trim() : existing.feature,
       description: input.description !== undefined ? input.description.trim() : existing.description,
       assigneeId: input.assigneeId ?? existing.assigneeId,
+      collaboratorIds: input.collaboratorIds ?? existing.collaboratorIds,
       status: input.status ?? existing.status,
       priority: input.priority ?? existing.priority,
       startDate: input.startDate ?? existing.startDate,
@@ -434,6 +578,35 @@ export class LocalStorageRepository implements WorkspaceRepository {
     }
 
     snap.tasks = snap.tasks.map((t) => (t.id === taskId ? updated : t));
+
+    if (updated.status !== existing.status && updated.milestoneId) {
+      const updatedMilestone = snap.milestones.find(
+        (milestone) => milestone.id === updated.milestoneId,
+      );
+      const milestoneIdsInPhase = new Set(
+        updatedMilestone?.phase == null
+          ? [updated.milestoneId]
+          : snap.milestones
+              .filter(
+                (milestone) =>
+                  milestone.projectId === updatedMilestone.projectId &&
+                  milestone.phase === updatedMilestone.phase,
+              )
+              .map((milestone) => milestone.id),
+      );
+      const linkedTasks = snap.tasks.filter(
+        (task) => task.milestoneId && milestoneIdsInPhase.has(task.milestoneId),
+      );
+      const completedTasks = linkedTasks.filter((task) => task.status === 'completed').length;
+      const progress = linkedTasks.length === 0
+        ? 0
+        : Math.round((completedTasks / linkedTasks.length) * 100);
+
+      snap.milestones = snap.milestones.map((milestone) =>
+        milestoneIdsInPhase.has(milestone.id) ? { ...milestone, progress } : milestone,
+      );
+    }
+
     this.writeSnapshot(snap);
     return updated;
   }
@@ -443,16 +616,34 @@ export class LocalStorageRepository implements WorkspaceRepository {
     const task = snap.tasks.find((item) => item.id === taskId);
     snap.tasks = snap.tasks.filter((t) => t.id !== taskId);
     if (task?.milestoneId) {
-      snap.tasks = snap.tasks.map((remainingTask) =>
-        remainingTask.milestoneId === task.milestoneId
-          ? { ...remainingTask, milestoneId: undefined }
-          : remainingTask,
+      const linkedTasks = snap.tasks.filter(
+        (remainingTask) => remainingTask.milestoneId === task.milestoneId,
       );
-      snap.milestones = compactPhases(
-        snap.milestones.filter((milestone) => milestone.id !== task.milestoneId),
-      );
+      if (linkedTasks.length === 0) {
+        snap.milestones = compactPhases(
+          snap.milestones.filter((milestone) => milestone.id !== task.milestoneId),
+        );
+      } else {
+        const completedTasks = linkedTasks.filter(
+          (remainingTask) => remainingTask.status === 'completed',
+        ).length;
+        const progress = Math.round((completedTasks / linkedTasks.length) * 100);
+        snap.milestones = snap.milestones.map((milestone) =>
+          milestone.id === task.milestoneId ? { ...milestone, progress } : milestone,
+        );
+      }
     }
     this.writeSnapshot(snap);
+  }
+
+  async saveCollaboratorDetail(taskId: string, userId: string, text: string): Promise<void> {
+    const snapshot = this.readSnapshot();
+    const task = snapshot.tasks.find(item => item.id === taskId);
+    if (!task?.collaboratorIds?.includes(userId) || task.status === 'completed') {
+      throw new Error('ไม่สามารถแก้ไขรายละเอียดผู้ร่วมงานในงานนี้ได้');
+    }
+    task.collaboratorDetails = { ...task.collaboratorDetails, [userId]: text.trim() };
+    this.writeSnapshot(snapshot);
   }
 
   async addComment(taskId: string, userId: string, text: string): Promise<Task> {
@@ -472,8 +663,40 @@ export class LocalStorageRepository implements WorkspaceRepository {
     return updated;
   }
 
+  async submitTask(taskId: string, userId: string, text: string, image?: string): Promise<Task> {
+    const snap = this.readSnapshot();
+    const task = snap.tasks.find((item) => item.id === taskId);
+    if (!task || task.status !== 'in_progress') throw new Error('งานนี้ไม่ได้อยู่ในสถานะกำลังทำ');
+    const comment = { id: generateId('c'), userId, text, createdAt: new Date().toISOString(), ...(image && { image }) };
+    const updated: Task = { ...task, status: 'review', comments: [...task.comments, comment] };
+    snap.tasks = snap.tasks.map((item) => item.id === taskId ? updated : item);
+    this.writeSnapshot(snap);
+    return updated;
+  }
+
+  async returnTask(taskId: string, userId: string, reason: string, image?: string): Promise<Task> {
+    const snap = this.readSnapshot();
+    const task = snap.tasks.find((item) => item.id === taskId);
+    if (!task || task.status !== 'review') throw new Error('งานนี้ไม่ได้อยู่ระหว่างรอตรวจสอบ');
+    if (!reason.trim()) throw new Error('กรุณาระบุสิ่งที่ต้องแก้ไข');
+    const comment = { id: generateId('c'), userId, text: `ส่งกลับแก้ไข\n${reason.trim()}`, createdAt: new Date().toISOString(), ...(image && { image }) };
+    const updated: Task = { ...task, status: 'in_progress', comments: [...task.comments, comment] };
+    snap.tasks = snap.tasks.map((item) => item.id === taskId ? updated : item);
+    this.writeSnapshot(snap);
+    return updated;
+  }
+
   async createMilestone(input: CreateMilestoneInput): Promise<Milestone> {
     const snap = this.readSnapshot();
+    if (
+      snap.milestones.some(
+        (milestone) =>
+          milestone.projectId === input.projectId &&
+          normalizeName(milestone.title) === normalizeName(input.title),
+      )
+    ) {
+      throw new Error('มี Milestone ชื่อนี้อยู่ในโปรเจคแล้ว');
+    }
     const milestone: Milestone = {
       id: generateId('m'),
       projectId: input.projectId,
@@ -503,6 +726,17 @@ export class LocalStorageRepository implements WorkspaceRepository {
     const snap = this.readSnapshot();
     const existing = snap.milestones.find((m) => m.id === milestoneId);
     if (!existing) throw new Error('ไม่พบ Milestone ที่ต้องการแก้ไข');
+    if (
+      input.title !== undefined &&
+      snap.milestones.some(
+        (milestone) =>
+          milestone.id !== milestoneId &&
+          milestone.projectId === existing.projectId &&
+          normalizeName(milestone.title) === normalizeName(input.title!),
+      )
+    ) {
+      throw new Error('มี Milestone ชื่อนี้อยู่ในโปรเจคแล้ว');
+    }
 
     const updated: Milestone = {
       ...existing,

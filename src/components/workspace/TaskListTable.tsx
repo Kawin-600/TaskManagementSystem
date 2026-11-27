@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Trash2 } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { Search, Trash2, X } from 'lucide-react';
 import {
   calculateDaysBetween,
   formatThaiDateShort,
@@ -23,6 +23,32 @@ export function TaskListTable({ project, tasks, onTaskClick }: TaskListTableProp
   const { currentUser } = useAuth();
   const { users, visibleMilestones, deleteTask } = useWorkspace();
   const [deletingTask, setDeletingTask] = useState<Task | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+
+  const filteredTasks = useMemo(() => {
+    const query = searchQuery.trim().toLocaleLowerCase();
+    if (!query) return tasks;
+    return tasks.filter((task) => {
+      const assignee = users.find((user) => user.id === task.assigneeId);
+      const milestone = visibleMilestones.find((item) => item.id === task.milestoneId);
+      return [task.title, task.module, task.feature, task.description, assignee?.name, milestone?.title]
+        .filter(Boolean)
+        .some((value) => value!.toLocaleLowerCase().includes(query));
+    });
+  }, [searchQuery, tasks, users, visibleMilestones]);
+
+  const groupedTasks = useMemo(() => {
+    const groups = new Map<string, Task[]>();
+    filteredTasks.forEach((task) => {
+      const key = (task.module?.trim() || '').toLocaleLowerCase();
+      const group = groups.get(key) ?? [];
+      group.push(task);
+      groups.set(key, group);
+    });
+    return Array.from(groups.values()).flatMap((group) =>
+      group.map((task, index) => ({ task, first: index === 0, count: group.length })),
+    );
+  }, [filteredTasks]);
 
   if (!currentUser) return null;
   const todayStr = getTodayStr();
@@ -35,11 +61,42 @@ export function TaskListTable({ project, tasks, onTaskClick }: TaskListTableProp
 
   return (
     <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <div className="flex flex-col gap-3 border-b border-slate-100 p-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h3 className="font-bold text-slate-800">รายการงาน</h3>
+          <p className="mt-0.5 text-[11px] text-slate-500">
+            แสดง {filteredTasks.length} จาก {tasks.length} งาน
+          </p>
+        </div>
+        <div className="relative w-full sm:w-80">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+          <input
+            type="search"
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            placeholder="ค้นหางาน, Feature, รายละเอียด, ผู้รับผิดชอบ..."
+            aria-label="ค้นหารายการงาน"
+            className="w-full rounded-xl border border-slate-200 py-2 pl-9 pr-9 text-xs text-slate-800 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+          />
+          {searchQuery && (
+            <button
+              type="button"
+              onClick={() => setSearchQuery('')}
+              aria-label="ล้างคำค้นหา"
+              className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
+      </div>
       <div className="overflow-x-auto">
         <table className="w-full text-left text-xs">
           <thead className="border-b border-slate-200 bg-slate-50 font-bold uppercase text-slate-600">
             <tr>
-              <th className="px-4 py-3">ชื่องาน</th>
+              <th className="px-4 py-3">Module</th>
+              <th className="px-4 py-3">Task</th>
+              <th className="px-4 py-3">Feature</th>
               <th className="px-4 py-3">ผู้รับผิดชอบ</th>
               <th className="px-4 py-3">วันเริ่มต้น - กำหนดส่ง</th>
               <th className="px-4 py-3">ระยะเวลา</th>
@@ -49,14 +106,14 @@ export function TaskListTable({ project, tasks, onTaskClick }: TaskListTableProp
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {tasks.length === 0 ? (
+            {filteredTasks.length === 0 ? (
               <tr>
-                <td colSpan={7} className="px-4 py-8 text-center text-slate-400">
-                  ยังไม่มีงานในโปรเจคนี้
+                <td colSpan={9} className="px-4 py-8 text-center text-slate-400">
+                  {tasks.length === 0 ? 'ยังไม่มีงานในโปรเจคนี้' : `ไม่พบงานที่ตรงกับ “${searchQuery.trim()}”`}
                 </td>
               </tr>
             ) : (
-              tasks.map((task) => {
+              groupedTasks.map(({ task, first, count }) => {
                 const assignee = users.find((u) => u.id === task.assigneeId);
                 const milestone = visibleMilestones.find(
                   (item) => item.id === task.milestoneId && item.projectId === task.projectId,
@@ -71,11 +128,14 @@ export function TaskListTable({ project, tasks, onTaskClick }: TaskListTableProp
                     onClick={() => onTaskClick(task.id)}
                     className="cursor-pointer transition hover:bg-slate-50"
                   >
-                    <td
-                      className={`px-4 py-3 font-semibold ${
-                        overdue ? 'text-rose-600' : 'text-slate-800'
-                      }`}
+                    {first && <td
+                      rowSpan={count}
+                      className="px-4 py-3 align-top font-semibold text-slate-800"
                     >
+                      <span>{task.module?.trim() || 'ไม่ได้ระบุ Module'}</span>
+                      <span className="mt-1 block text-[10px] font-medium text-slate-400">{count} งาน</span>
+                    </td>}
+                    <td className={`px-4 py-3 font-semibold ${overdue ? 'text-rose-600' : 'text-slate-800'}`}>
                       <div className="flex items-center gap-2">
                         <span>{task.title}</span>
                         {overdue && (
@@ -88,6 +148,15 @@ export function TaskListTable({ project, tasks, onTaskClick }: TaskListTableProp
                         <span className="mt-1 inline-flex rounded-full border border-indigo-100 bg-indigo-50 px-2 py-0.5 text-[10px] font-semibold text-indigo-700">
                           Milestone: {milestone.title}
                         </span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      {task.feature?.trim() ? (
+                        <span className="inline-block rounded-lg bg-indigo-50 px-2.5 py-1 font-semibold text-indigo-700">
+                          {task.feature.trim()}
+                        </span>
+                      ) : (
+                        <span className="text-slate-400">ไม่ได้ระบุ</span>
                       )}
                     </td>
                     <td className="px-4 py-3">

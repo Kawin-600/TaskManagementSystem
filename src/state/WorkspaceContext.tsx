@@ -19,6 +19,7 @@ import {
   canDeleteTask,
   canDeleteUser,
   canEditTask,
+  canSetTaskPriority,
   canManageProject,
   canModifyUserRole,
   getVisibleProjects,
@@ -34,6 +35,8 @@ import type {
   CreateProjectInput,
   CreateTaskInput,
   CreateUserInput,
+  ImportProjectsInput,
+  ImportProjectsResult,
   Project,
   Task,
   TaskStatus,
@@ -43,6 +46,15 @@ import type {
   UserRole,
 } from '../types/models';
 import { getThaiRoleName, getThaiStatusName } from '../components/ui/Badges';
+import type { TaskNotificationEvent } from '../domain/taskNotifications';
+import { formatDateObj, formatThaiDateShort } from '../domain/dates';
+import { readTelegramPreferences, requestTelegramSettings, telegramHeaders } from '../services/telegramSettings';
+import {
+  buildTelegramDigest,
+  getTelegramDigestKind,
+  selectTelegramDigestTasks,
+  telegramPriorityLabels,
+} from '../domain/telegramDigest';
 import { useAuth } from './AuthContext';
 import { useToast } from './ToastContext';
 
@@ -60,13 +72,17 @@ interface WorkspaceContextValue {
   updateProject: (projectId: string, input: UpdateProjectInput) => Promise<Project | null>;
   updateProjectMembers: (projectId: string, memberIds: string[]) => Promise<boolean>;
   deleteProject: (projectId: string) => Promise<boolean>;
+  importProjects: (input: ImportProjectsInput) => Promise<ImportProjectsResult | null>;
+  updateExcelAlias: (alias: string) => Promise<boolean>;
   createTask: (input: CreateTaskInput) => Promise<Task | null>;
   updateTask: (taskId: string, input: UpdateTaskInput) => Promise<Task | null>;
   moveTaskStatus: (taskId: string, newStatus: TaskStatus) => Promise<boolean>;
   approveTask: (taskId: string) => Promise<boolean>;
-  rejectTask: (taskId: string) => Promise<boolean>;
+  rejectTask: (taskId: string, reason?: string, image?: string) => Promise<boolean>;
   deleteTask: (taskId: string) => Promise<boolean>;
   addComment: (taskId: string, text: string) => Promise<boolean>;
+  submitTask: (taskId: string, text: string, image?: string) => Promise<boolean>;
+  saveCollaboratorDetail: (taskId: string, text: string) => Promise<void>;
   createMilestone: (input: CreateMilestoneInput) => Promise<Milestone | null>;
   updateMilestone: (milestoneId: string, input: UpdateMilestoneInput) => Promise<Milestone | null>;
   deleteMilestone: (milestoneId: string) => Promise<boolean>;
@@ -97,6 +113,44 @@ export function WorkspaceProvider({
   const [tasks, setTasks] = useState<Task[]>([]);
   const [milestones, setMilestones] = useState<Milestone[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+
+  const notifyTask = useCallback(async (task: Task, ...events: TaskNotificationEvent[]) => {
+    if (!events.length) return false;
+    try {
+      const preferences = readTelegramPreferences(task.assigneeId);
+      const telegramEvents = preferences.priorities.includes(task.priority) ? events.filter((event) =>
+        preferences.topics.includes(
+          event === 'created' || event === 'assigned' || event === 'dueDateChanged' || event === 'priorityChanged'
+            ? event
+            : 'statusChanged',
+        ),
+      ) : [];
+      const response = await fetch('/api/task-notifications', {
+        method: 'POST',
+        headers: telegramHeaders(),
+        body: JSON.stringify({
+          events,
+          telegramEvents,
+          assigneeId: task.assigneeId,
+          task: {
+            title: task.title.slice(0, 180),
+            assignee: users.find((user) => user.id === task.assigneeId)?.name.slice(0, 180),
+          priority: telegramPriorityLabels[task.priority],
+            dueDate: task.dueDate ? formatThaiDateShort(task.dueDate) : undefined,
+          },
+        }),
+        keepalive: true,
+        signal: AbortSignal.timeout(10000),
+      });
+      if (response.status === 204 || response.status === 404) return false;
+      if (!response.ok) throw new Error('Task notification request failed');
+      const result = await response.json();
+      const failed = [result.telegram === 'failed' && 'Telegram', result.line === 'failed' && 'LINE'].filter(Boolean);
+      if (failed.length) showToast(`บันทึกงานแล้ว แต่ส่งแจ้งเตือนผ่าน ${failed.join(' และ ')} ไม่สำเร็จ`, 'warning');
+    } catch {
+      showToast('บันทึกงานแล้ว แต่ระบบแจ้งเตือนติดต่อไม่ได้', 'warning');
+    }
+  }, [showToast, users]);
 
   const reload = useCallback(async () => {
     const snap = await repository.loadAll();
@@ -138,6 +192,50 @@ export function WorkspaceProvider({
     () => (currentUser ? getVisibleTasks(currentUser, projects, tasks) : []),
     [currentUser, projects, tasks],
   );
+
+  useEffect(() => {
+    if (!currentUser || isLoading) return;
+    const userId = currentUser.id;
+    const lockKey = `taskflow.telegramDigest.${userId}`;
+    let active = true;
+    let checking = false;
+
+    async function check() {
+      if (!active || checking) return;
+      checking = true;
+      try {
+        const sendDigest = async () => {
+          if (!active) return;
+          const now = new Date();
+          const today = formatDateObj(now);
+          const kind = getTelegramDigestKind(now);
+          const preferences = readTelegramPreferences(userId);
+          if (!kind || !preferences.digests.includes(kind) || !preferences.priorities.length) return;
+          const historyKey = `${lockKey}.${kind}`;
+          if (localStorage.getItem(historyKey) === today) return;
+          const eligible = selectTelegramDigestTasks(visibleTasks, userId, preferences.priorities, kind, now);
+          const result = await requestTelegramSettings(userId, 'digest', buildTelegramDigest(kind, eligible, getThaiStatusName));
+          if (result.result === 'accepted') localStorage.setItem(historyKey, today);
+        };
+        if (navigator.locks) await navigator.locks.request(lockKey, sendDigest);
+        else await sendDigest();
+      } catch {
+        // Try again on the next check if browser storage is unavailable.
+      } finally {
+        checking = false;
+      }
+    }
+
+    void check();
+    const timer = window.setInterval(() => void check(), 60000);
+    const onChange = () => void check();
+    window.addEventListener('taskflow:telegram-preferences', onChange);
+    return () => {
+      active = false;
+      clearInterval(timer);
+      window.removeEventListener('taskflow:telegram-preferences', onChange);
+    };
+  }, [currentUser, isLoading, visibleTasks]);
 
   const visibleMilestones = useMemo(
     () => (currentUser ? getVisibleMilestones(currentUser, projects, milestones) : []),
@@ -235,6 +333,28 @@ export function WorkspaceProvider({
     [currentUser, projects, repository, reload, showToast],
   );
 
+  const importProjects = useCallback(
+    async (input: ImportProjectsInput): Promise<ImportProjectsResult | null> => {
+      if (!currentUser || !canCreateProject(currentUser) || input.supervisorId !== currentUser.id) {
+        showToast('คุณไม่มีสิทธิ์นำเข้าโปรเจค', 'error');
+        return null;
+      }
+      try {
+        const result = await repository.importProjects(input);
+        await reload();
+        const skipped = result.skippedProjectNames.length
+          ? ` (ข้ามโปรเจคชื่อซ้ำ ${result.skippedProjectNames.length} รายการ)`
+          : '';
+        showToast(`นำเข้า ${result.projectCount} โปรเจค และ ${result.taskCount} งานสำเร็จ${skipped}`, 'success');
+        return result;
+      } catch (err) {
+        showToast(formatRepoError(err, 'นำเข้า Excel ไม่สำเร็จ'), 'error');
+        return null;
+      }
+    },
+    [currentUser, repository, reload, showToast],
+  );
+
   const createTask = useCallback(
     async (input: CreateTaskInput): Promise<Task | null> => {
       const project = projects.find((p) => p.id === input.projectId);
@@ -244,16 +364,18 @@ export function WorkspaceProvider({
       }
       try {
         const assigneeId = currentUser.role === 'staff' ? currentUser.id : input.assigneeId;
-        const created = await repository.createTask({ ...input, assigneeId });
+        const priority = canSetTaskPriority(currentUser) ? input.priority : 'medium';
+        const created = await repository.createTask({ ...input, assigneeId, priority });
         await reload();
         showToast('สร้างงานใหม่สำเร็จเรียบร้อยแล้ว', 'success');
+        notifyTask(created, 'created');
         return created;
       } catch (err) {
         showToast(formatRepoError(err, 'สร้างงานไม่สำเร็จ'), 'error');
         return null;
       }
     },
-    [currentUser, projects, repository, reload, showToast],
+    [currentUser, projects, repository, reload, showToast, notifyTask],
   );
 
   const updateTask = useCallback(
@@ -262,8 +384,21 @@ export function WorkspaceProvider({
       const project = projects.find((p) => p.id === task?.projectId);
       if (!currentUser || !task || !project) return null;
 
-      if (!canEditTask(currentUser, task, project)) {
+      if (!canEditTask(currentUser, task, project) || (currentUser.role === 'staff' && input.collaboratorIds !== undefined)) {
         showToast('คุณไม่มีสิทธิ์แก้ไขงานนี้', 'error');
+        return null;
+      }
+
+      if (currentUser.role === 'staff' && (
+        (input.startDate !== undefined && input.startDate !== task.startDate) ||
+        (input.dueDate !== undefined && input.dueDate !== task.dueDate)
+      )) {
+        showToast('เจ้าหน้าที่ไม่มีสิทธิ์เปลี่ยนวันเริ่มต้นหรือวันกำหนดส่ง', 'error');
+        return null;
+      }
+
+      if (!canSetTaskPriority(currentUser) && input.priority !== undefined && input.priority !== task.priority) {
+        showToast('คุณไม่มีสิทธิ์เปลี่ยนระดับความสำคัญของงาน', 'error');
         return null;
       }
 
@@ -281,13 +416,19 @@ export function WorkspaceProvider({
         const updated = await repository.updateTask(taskId, safeInput);
         await reload();
         showToast('อัปเดตข้อมูลงานสำเร็จ', 'success');
+        const events: TaskNotificationEvent[] = [];
+        if (updated.assigneeId !== task.assigneeId) events.push('assigned');
+        if (updated.dueDate !== task.dueDate) events.push('dueDateChanged');
+        if (updated.priority !== task.priority) events.push('priorityChanged');
+        if (updated.status !== task.status) events.push(updated.status);
+        notifyTask(updated, ...events);
         return updated;
       } catch (err) {
         showToast(formatRepoError(err, 'อัปเดตข้อมูลงานไม่สำเร็จ'), 'error');
         return null;
       }
     },
-    [currentUser, tasks, projects, repository, reload, showToast],
+    [currentUser, tasks, projects, repository, reload, showToast, notifyTask],
   );
 
   const moveTaskStatus = useCallback(
@@ -296,6 +437,10 @@ export function WorkspaceProvider({
       const project = projects.find((p) => p.id === task?.projectId);
       if (!currentUser || !task || !project) return false;
       if (task.status === newStatus) return true;
+      if (task.status === 'review' && newStatus === 'in_progress') {
+        showToast('กรุณาเปิดงานและระบุสิ่งที่ต้องแก้ไขก่อนส่งกลับ', 'warning');
+        return false;
+      }
 
       const check = validateTaskStatusTransition(currentUser, task, newStatus, project);
       if (!check.allowed) {
@@ -310,13 +455,14 @@ export function WorkspaceProvider({
         await repository.updateTask(taskId, { status: newStatus });
         await reload();
         showToast(`อัปเดตสถานะงานเป็น: ${getThaiStatusName(newStatus)}`, 'success');
+        notifyTask(task, newStatus);
         return true;
       } catch (err) {
         showToast(formatRepoError(err, 'เปลี่ยนสถานะงานไม่สำเร็จ'), 'error');
         return false;
       }
     },
-    [currentUser, tasks, projects, repository, reload, showToast],
+    [currentUser, tasks, projects, repository, reload, showToast, notifyTask],
   );
 
   const approveTask = useCallback(
@@ -331,34 +477,37 @@ export function WorkspaceProvider({
         await repository.updateTask(taskId, { status: 'completed' });
         await reload();
         showToast(`อนุมัติงาน "${task.title}" สำเร็จแล้ว`, 'success');
+        if (task.status !== 'completed') notifyTask(task, 'completed');
         return true;
       } catch (err) {
         showToast(formatRepoError(err, 'อนุมัติงานไม่สำเร็จ'), 'error');
         return false;
       }
     },
-    [currentUser, tasks, projects, repository, reload, showToast],
+    [currentUser, tasks, projects, repository, reload, showToast, notifyTask],
   );
 
   const rejectTask = useCallback(
-    async (taskId: string): Promise<boolean> => {
+    async (taskId: string, reason = '', image?: string): Promise<boolean> => {
       const task = tasks.find((t) => t.id === taskId);
       const project = projects.find((p) => p.id === task?.projectId);
       if (!currentUser || !task || !project || !canApproveOrRejectTask(currentUser, task, project)) {
         showToast('คุณไม่มีสิทธิ์ส่งกลับแก้ไขงานนี้', 'error');
         return false;
       }
+      if (!reason?.trim()) { showToast('กรุณาระบุสิ่งที่ต้องแก้ไข', 'error'); return false; }
       try {
-        await repository.updateTask(taskId, { status: 'in_progress' });
+        await repository.returnTask(taskId, currentUser.id, reason, image);
         await reload();
         showToast(`ส่งงาน "${task.title}" กลับไปแก้ไขเพิ่มเติม`, 'warning');
+        if (task.status !== 'in_progress') notifyTask(task, 'in_progress');
         return true;
       } catch (err) {
         showToast(formatRepoError(err, 'ส่งกลับแก้ไขไม่สำเร็จ'), 'error');
         return false;
       }
     },
-    [currentUser, tasks, projects, repository, reload, showToast],
+    [currentUser, tasks, projects, repository, reload, showToast, notifyTask],
   );
 
   const deleteTask = useCallback(
@@ -382,6 +531,17 @@ export function WorkspaceProvider({
     [currentUser, tasks, projects, repository, reload, showToast],
   );
 
+  const saveCollaboratorDetail = async (taskId: string, text: string) => {
+    if (!currentUser || !visibleTasks.some(task => task.id === taskId)) return;
+    try {
+      await repository.saveCollaboratorDetail(taskId, currentUser.id, text);
+      await reload();
+      showToast('บันทึกรายละเอียดของคุณแล้ว', 'success');
+    } catch (err) {
+      showToast(formatRepoError(err, 'บันทึกรายละเอียดไม่สำเร็จ'), 'error');
+    }
+  };
+
   const addComment = useCallback(
     async (taskId: string, text: string): Promise<boolean> => {
       const trimmed = text.trim();
@@ -404,6 +564,25 @@ export function WorkspaceProvider({
     },
     [currentUser, tasks, projects, repository, reload, showToast],
   );
+
+  const submitTask = useCallback(async (taskId: string, text: string, image?: string): Promise<boolean> => {
+    const task = tasks.find((item) => item.id === taskId);
+    const project = projects.find((item) => item.id === task?.projectId);
+    if (!currentUser || !task || !project || task.status !== 'in_progress' || !canCommentOnTask(currentUser, task, project) || !validateTaskStatusTransition(currentUser, task, 'review', project).allowed) {
+      showToast('คุณไม่มีสิทธิ์ส่งงานนี้', 'error');
+      return false;
+    }
+    try {
+      await repository.submitTask(taskId, currentUser.id, text, image);
+      await reload();
+      notifyTask(task, 'review');
+      showToast('ส่งงานเพื่อตรวจสอบแล้ว', 'success');
+      return true;
+    } catch (err) {
+      showToast(formatRepoError(err, 'ส่งงานไม่สำเร็จ'), 'error');
+      return false;
+    }
+  }, [currentUser, tasks, projects, repository, reload, notifyTask, showToast]);
 
   const createUser = useCallback(
     async (input: CreateUserInput): Promise<User | null> => {
@@ -556,7 +735,7 @@ export function WorkspaceProvider({
       value={{
         users,
         projects,
-        tasks,
+        tasks: currentUser && currentUser.role !== 'staff' ? tasks : visibleTasks,
         milestones,
         visibleProjects,
         visibleTasks,
@@ -567,6 +746,19 @@ export function WorkspaceProvider({
         updateProject,
         updateProjectMembers,
         deleteProject,
+        importProjects,
+        updateExcelAlias: async (alias) => {
+          if (!currentUser || !repository.updateExcelAlias) return false;
+          try {
+            await repository.updateExcelAlias(currentUser.id, alias);
+            await reload();
+            showToast('บันทึกชื่อสำหรับ Excel แล้ว', 'success');
+            return true;
+          } catch (err) {
+            showToast(formatRepoError(err, 'บันทึกชื่อไม่สำเร็จ'), 'error');
+            return false;
+          }
+        },
         createTask,
         updateTask,
         moveTaskStatus,
@@ -574,6 +766,8 @@ export function WorkspaceProvider({
         rejectTask,
         deleteTask,
         addComment,
+        submitTask,
+        saveCollaboratorDetail,
         createMilestone,
         updateMilestone,
         deleteMilestone,

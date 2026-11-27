@@ -1,12 +1,16 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Plus, ArrowRight, Trash2, Pencil, Clock } from 'lucide-react';
+import { Plus, ArrowRight, Trash2, Pencil, Clock, Download, FileSpreadsheet } from 'lucide-react';
 import { canCreateProject, canManageProject } from '../domain/rbac';
 import { useAuth } from '../state/AuthContext';
 import { useWorkspace } from '../state/WorkspaceContext';
 import type { Project } from '../types/models';
 import { AvatarCircle } from '../components/ui/Badges';
 import { Modal } from '../components/ui/Modal';
+import { ExcelProjectImportModal } from '../components/modals/ExcelProjectImportModal';
+import { exportProjectsToExcel } from '../services/excelProjectExport';
+import { getTodayStr } from '../domain/dates';
+import { useToast } from '../state/ToastContext';
 
 interface ProjectsOverviewPageProps {
   onOpenCreateProject: () => void;
@@ -19,7 +23,10 @@ export function ProjectsOverviewPage({
 }: ProjectsOverviewPageProps) {
   const { currentUser } = useAuth();
   const { visibleProjects, visibleTasks, users, deleteProject } = useWorkspace();
+  const { showToast } = useToast();
   const [deletingProject, setDeletingProject] = useState<Project | null>(null);
+  const [isImportOpen, setIsImportOpen] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
 
   if (!currentUser) return null;
 
@@ -27,6 +34,24 @@ export function ProjectsOverviewPage({
     if (!deletingProject) return;
     await deleteProject(deletingProject.id);
     setDeletingProject(null);
+  };
+
+  const handleExport = async () => {
+    if (visibleProjects.length === 0 || isExporting) return;
+    setIsExporting(true);
+    try {
+      await exportProjectsToExcel(
+        visibleProjects,
+        visibleTasks,
+        users,
+        `TaskFlow-projects-${getTodayStr()}.xlsx`,
+      );
+      showToast(`ส่งออก ${visibleProjects.length} โปรเจค และ ${visibleTasks.length} งานเรียบร้อยแล้ว`, 'success');
+    } catch {
+      showToast('ส่งออกไฟล์ Excel ไม่สำเร็จ', 'error');
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   return (
@@ -42,14 +67,33 @@ export function ProjectsOverviewPage({
         </div>
 
         {canCreateProject(currentUser) && (
-          <button
-            type="button"
-            onClick={onOpenCreateProject}
-            className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-indigo-700"
-          >
-            <Plus className="h-4 w-4" />
-            <span>สร้างโปรเจคใหม่</span>
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={handleExport}
+              disabled={visibleProjects.length === 0 || isExporting}
+              className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Download className="h-4 w-4" />
+              <span>{isExporting ? 'กำลังส่งออก...' : 'ส่งออก Excel'}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsImportOpen(true)}
+              className="inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-100"
+            >
+              <FileSpreadsheet className="h-4 w-4" />
+              <span>นำเข้า Excel</span>
+            </button>
+            <button
+              type="button"
+              onClick={onOpenCreateProject}
+              className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-indigo-700"
+            >
+              <Plus className="h-4 w-4" />
+              <span>สร้างโปรเจคใหม่</span>
+            </button>
+          </div>
         )}
       </div>
 
@@ -194,6 +238,8 @@ export function ProjectsOverviewPage({
           </div>
         </div>
       </Modal>
+
+      <ExcelProjectImportModal isOpen={isImportOpen} onClose={() => setIsImportOpen(false)} />
     </div>
   );
 }

@@ -1,3 +1,4 @@
+import { participatesInTask } from '../../domain/rbac';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
@@ -9,6 +10,7 @@ import {
   Users,
   ShieldCheck,
   LogOut,
+  Bell,
 } from 'lucide-react';
 import { canAccessAdmin, canManageUsers } from '../../domain/rbac';
 import { useAuth } from '../../state/AuthContext';
@@ -41,7 +43,7 @@ export function IconRail({ onNavigate }: IconRailProps) {
   if (!currentUser) return null;
 
   const myActiveCount = visibleTasks.filter(
-    (t) => t.assigneeId === currentUser.id && t.status !== 'completed',
+    (t) => participatesInTask(t, currentUser.id) && t.status !== 'completed',
   ).length;
 
   const navItems = [
@@ -157,6 +159,11 @@ export function IconRail({ onNavigate }: IconRailProps) {
             <div className="mb-3">
               <RoleBadge role={currentUser.role} />
             </div>
+            <Link to="/settings/telegram" onClick={() => { setAccountOpen(false); onNavigate?.(); }}
+              className="mb-2 flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold hover:bg-slate-100">
+              <Bell className="h-3.5 w-3.5" />
+              ตั้งค่าบัญชีและ Telegram
+            </Link>
             <button
               type="button"
               onClick={handleLogout}

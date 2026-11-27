@@ -21,6 +21,7 @@ import { GlobalSchedulePage } from './pages/GlobalSchedulePage';
 import { TeamWorkloadPage } from './pages/TeamWorkloadPage';
 import { AdminUsersPage } from './pages/AdminUsersPage';
 import { AdminRbacPage } from './pages/AdminRbacPage';
+import { TelegramSettingsPage } from './pages/TelegramSettingsPage';
 
 function ProtectedRoute({ children }: { children: JSX.Element }) {
   const { currentUser, isLoading } = useAuth();
@@ -184,6 +185,7 @@ export function AppRoutes({
             }
           />
           <Route path="/team" element={<TeamWorkloadPage />} />
+          <Route path="/settings/telegram" element={<TelegramSettingsPage />} />
           <Route
             path="/admin/users"
             element={
