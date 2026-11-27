@@ -28,6 +28,7 @@ export interface WorkspaceSnapshot {
 
 export interface WorkspaceRepository {
   loadAll(): Promise<WorkspaceSnapshot>;
+  updateExcelAlias?(userId: string, alias: string): Promise<void>;
   createProject(input: CreateProjectInput): Promise<Project>;
   updateProject(projectId: string, input: UpdateProjectInput): Promise<Project>;
   updateProjectMembers(
@@ -40,6 +41,8 @@ export interface WorkspaceRepository {
   updateTask(taskId: string, input: UpdateTaskInput): Promise<Task>;
   deleteTask(taskId: string): Promise<void>;
   addComment(taskId: string, userId: string, text: string): Promise<Task>;
+  submitTask(taskId: string, userId: string, text: string, image?: string): Promise<Task>;
+  returnTask(taskId: string, userId: string, reason: string, image?: string): Promise<Task>;
   saveCollaboratorDetail(taskId: string, userId: string, text: string): Promise<void>;
   createMilestone(input: CreateMilestoneInput): Promise<Milestone>;
   updateMilestone(milestoneId: string, input: UpdateMilestoneInput): Promise<Milestone>;
@@ -314,6 +317,13 @@ export class LocalStorageRepository implements WorkspaceRepository {
     return this.readSnapshot();
   }
 
+  async updateExcelAlias(userId: string, alias: string): Promise<void> {
+    const snap = this.readSnapshot();
+    if (!snap.users.some((user) => user.id === userId)) throw new Error('ไม่พบผู้ใช้');
+    snap.users = snap.users.map((user) => user.id === userId ? { ...user, excelAlias: alias.trim() } : user);
+    this.writeSnapshot(snap);
+  }
+
   async createProject(input: CreateProjectInput): Promise<Project> {
     const snap = this.readSnapshot();
     const project: Project = {
@@ -348,7 +358,7 @@ export class LocalStorageRepository implements WorkspaceRepository {
         description: `นำเข้าจาก Excel: ${input.sourceName}`,
         color: PROJECT_COLORS[projectIndex % PROJECT_COLORS.length],
         supervisorId: input.supervisorId,
-        memberIds: [input.supervisorId],
+        memberIds: dedupe([input.supervisorId, ...importedProject.tasks.flatMap((task) => [task.assigneeId, ...(task.collaboratorIds ?? [])]).filter((id): id is string => Boolean(id && snap.users.some((user) => user.id === id)))]),
       };
       snap.projects.push(project);
       existingNames.add(name.toLowerCase());
@@ -383,8 +393,8 @@ export class LocalStorageRepository implements WorkspaceRepository {
           module: importedTask.module?.trim() ?? '',
           feature: importedTask.feature.trim(),
           description: importedTask.description.trim(),
-          assigneeId: input.supervisorId,
-          collaboratorIds: [],
+          assigneeId: project.memberIds.includes(importedTask.assigneeId ?? '') ? importedTask.assigneeId! : input.supervisorId,
+          collaboratorIds: dedupe(importedTask.collaboratorIds ?? []).filter((id) => project.memberIds.includes(id) && id !== (project.memberIds.includes(importedTask.assigneeId ?? '') ? importedTask.assigneeId : input.supervisorId)),
           status: importedTask.status,
           priority: 'medium',
           startDate: importedTask.startDate,
@@ -649,6 +659,29 @@ export class LocalStorageRepository implements WorkspaceRepository {
     };
     const updated: Task = { ...existing, comments: [...existing.comments, comment] };
     snap.tasks = snap.tasks.map((t) => (t.id === taskId ? updated : t));
+    this.writeSnapshot(snap);
+    return updated;
+  }
+
+  async submitTask(taskId: string, userId: string, text: string, image?: string): Promise<Task> {
+    const snap = this.readSnapshot();
+    const task = snap.tasks.find((item) => item.id === taskId);
+    if (!task || task.status !== 'in_progress') throw new Error('งานนี้ไม่ได้อยู่ในสถานะกำลังทำ');
+    const comment = { id: generateId('c'), userId, text, createdAt: new Date().toISOString(), ...(image && { image }) };
+    const updated: Task = { ...task, status: 'review', comments: [...task.comments, comment] };
+    snap.tasks = snap.tasks.map((item) => item.id === taskId ? updated : item);
+    this.writeSnapshot(snap);
+    return updated;
+  }
+
+  async returnTask(taskId: string, userId: string, reason: string, image?: string): Promise<Task> {
+    const snap = this.readSnapshot();
+    const task = snap.tasks.find((item) => item.id === taskId);
+    if (!task || task.status !== 'review') throw new Error('งานนี้ไม่ได้อยู่ระหว่างรอตรวจสอบ');
+    if (!reason.trim()) throw new Error('กรุณาระบุสิ่งที่ต้องแก้ไข');
+    const comment = { id: generateId('c'), userId, text: `ส่งกลับแก้ไข\n${reason.trim()}`, createdAt: new Date().toISOString(), ...(image && { image }) };
+    const updated: Task = { ...task, status: 'in_progress', comments: [...task.comments, comment] };
+    snap.tasks = snap.tasks.map((item) => item.id === taskId ? updated : item);
     this.writeSnapshot(snap);
     return updated;
   }

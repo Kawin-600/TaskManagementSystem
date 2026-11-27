@@ -179,10 +179,20 @@ function TelegramConditionSettings({ userId }: { userId: string }) {
 
 export function TelegramSettingsPage() {
   const { currentUser } = useAuth();
+  const { users, updateExcelAlias } = useWorkspace();
+  const user = users.find((item) => item.id === currentUser?.id);
+  const [alias, setAlias] = useState('');
+  useEffect(() => { setAlias(user?.excelAlias ?? ''); }, [user?.id, user?.excelAlias]);
   if (!currentUser) return null;
   return (
     <div className="mx-auto max-w-xl space-y-4">
-      <h1 className="text-xl font-bold text-slate-900">ตั้งค่า Telegram</h1>
+      <h1 className="text-xl font-bold text-slate-900">ตั้งค่าบัญชีและ Telegram</h1>
+      <form onSubmit={(event) => { event.preventDefault(); void updateExcelAlias(alias); }} className="space-y-3 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <label htmlFor="excel-alias" className="block text-sm font-semibold text-slate-700">ชื่อเล่นที่ใช้ใน Excel</label>
+        <p className="text-xs text-slate-500">ใช้จับคู่กับคอลัมน์ Owner ตอนนำเข้างาน</p>
+        <input id="excel-alias" value={alias} onChange={(event) => setAlias(event.target.value)} maxLength={100} className="block w-full rounded-lg border border-slate-300 px-3 py-2" />
+        <button type="submit" className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white">บันทึกชื่อ</button>
+      </form>
       <p className="text-sm text-slate-600">รับแจ้งเตือนงานของ {currentUser.name} ทางแชตส่วนตัวกับบอต</p>
       <TelegramSettings key={currentUser.id} userId={currentUser.id} />
       <TelegramConditionSettings key={`conditions-${currentUser.id}`} userId={currentUser.id} />

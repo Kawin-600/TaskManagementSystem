@@ -217,7 +217,7 @@ export function MyTasksPage({ onOpenTaskDetail, onOpenCreateTask }: MyTasksPageP
                         style={{ backgroundColor: prj?.color ?? '#4f46e5' }}
                       />
                       <span
-                        className={`truncate text-sm font-semibold ${
+                        className={`min-w-0 break-words text-sm font-semibold leading-relaxed ${
                           overdue ? 'text-rose-600' : 'text-slate-800'
                         }`}
                       >
@@ -226,7 +226,7 @@ export function MyTasksPage({ onOpenTaskDetail, onOpenCreateTask }: MyTasksPageP
                     </div>
                     <div className="flex flex-wrap items-center gap-3 pl-4 text-xs text-slate-400">
                       <span>{prj?.name ?? '-'}</span>
-                      {task.feature?.trim() && <span>Feature: {task.feature}</span>}
+                      {task.feature?.trim() && task.feature.trim() !== task.title.trim() && <span>Feature: {task.feature}</span>}
                       <span className="flex items-center gap-1">
                         <Calendar className="h-3 w-3" />
                         {formatThaiDateShort(task.startDate)} - {formatThaiDateShort(task.dueDate)} (

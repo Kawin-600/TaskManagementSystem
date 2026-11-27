@@ -8,6 +8,40 @@ describe('LocalStorageRepository', () => {
     localStorage.clear();
   });
 
+  it('keeps submission and return feedback with each status change', async () => {
+    const repo = new LocalStorageRepository(() => '2026-11-20');
+    const snap = await repo.loadAll();
+    const task = snap.tasks.find((item) => item.status === 'in_progress')!;
+    await repo.submitTask(task.id, task.assigneeId, 'ส่งงานเพื่อตรวจสอบ\nผลงาน', 'data:image/png;base64,abc');
+    await expect(repo.returnTask(task.id, 'u2', '  ')).rejects.toThrow();
+    await repo.returnTask(task.id, 'u2', 'แก้ไขภาพ', 'data:image/png;base64,feedback');
+    const saved = (await repo.loadAll()).tasks.find((item) => item.id === task.id)!;
+    expect(saved.status).toBe('in_progress');
+    expect(saved.comments.slice(-2)).toMatchObject([{ image: 'data:image/png;base64,abc' }, { text: 'ส่งกลับแก้ไข\nแก้ไขภาพ', userId: 'u2', image: 'data:image/png;base64,feedback' }]);
+  });
+
+  it('adds imported collaborators to the project and avoids duplicate or invalid assignments', async () => {
+    const repo = new LocalStorageRepository(() => '2026-11-20');
+    await repo.loadAll();
+    await repo.importProjects({ supervisorId: 'u2', sourceName: 'test.xlsx', projects: [{ name: 'Multiple owners', tasks: [{ title: 'Task', feature: '', description: '', assigneeId: 'u3', collaboratorIds: ['u4', 'u4', 'u3', 'invalid'], status: 'todo', startDate: '2026-11-01', dueDate: '2026-11-02' }] }] });
+    const snapshot = await repo.loadAll();
+    const project = snapshot.projects.find((item) => item.name === 'Multiple owners')!;
+    expect(project.memberIds).toEqual(['u2', 'u3', 'u4']);
+    expect(snapshot.tasks.find((task) => task.projectId === project.id)).toMatchObject({ assigneeId: 'u3', collaboratorIds: ['u4'] });
+  });
+
+  it('saves a user Excel alias and assigns imported tasks to the selected owner', async () => {
+    const repo = new LocalStorageRepository(() => '2026-11-20');
+    await repo.loadAll();
+    await repo.updateExcelAlias('u3', '  Nest  ');
+    await repo.importProjects({ supervisorId: 'u2', sourceName: 'test.xlsx', projects: [{ name: 'Imported owner test', tasks: [{ title: 'Task', module: 'Module', feature: '', description: '', ownerName: 'Nest', assigneeId: 'u3', status: 'todo', startDate: '2026-11-01', dueDate: '2026-11-02' }] }] });
+    const snapshot = await repo.loadAll();
+    const project = snapshot.projects.find((item) => item.name === 'Imported owner test')!;
+    expect(snapshot.users.find((user) => user.id === 'u3')?.excelAlias).toBe('Nest');
+    expect(project.memberIds).toContain('u3');
+    expect(snapshot.tasks.find((task) => task.projectId === project.id)?.assigneeId).toBe('u3');
+  });
+
   it('keeps milestone dates covering linked tasks as dates and links change', async () => {
     const repo = new LocalStorageRepository(() => '2026-11-20');
     await repo.loadAll();

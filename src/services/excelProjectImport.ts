@@ -3,6 +3,10 @@ import type { ImportProjectInput, TaskStatus } from '../types/models';
 
 type ExcelRow = Record<string, unknown>;
 
+export function splitOwnerNames(value?: string): string[] {
+  return (value ?? '').split(/[,;\/\n\r]+/).map((name) => name.trim()).filter(Boolean);
+}
+
 export interface ExcelProjectPreview {
   sheetName: string;
   projects: ImportProjectInput[];
@@ -56,6 +60,7 @@ export async function parseProjectExcel(buffer: ArrayBuffer): Promise<ExcelProje
   const sheet = workbook.Sheets[sheetName];
   const header = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, range: 0, blankrows: false })[0];
   const featureColumn = header?.indexOf('Feature') ?? -1;
+  const inheritedFeatureRows = new Set<number>();
   // Only fill cells covered by an actual Excel merge. A genuinely blank Feature
   // must stay blank rather than inheriting an unrelated preceding value.
   for (const merge of sheet['!merges'] ?? []) {
@@ -64,7 +69,10 @@ export async function parseProjectExcel(buffer: ArrayBuffer): Promise<ExcelProje
     if (!source) continue;
     for (let row = merge.s.r; row <= merge.e.r; row += 1) {
       const address = XLSX.utils.encode_cell({ r: row, c: featureColumn });
-      if (!text(sheet[address]?.v)) sheet[address] = { ...source };
+      if (!text(sheet[address]?.v)) {
+        sheet[address] = { ...source };
+        inheritedFeatureRows.add(row);
+      }
     }
   }
   const rows = XLSX.utils.sheet_to_json<ExcelRow>(sheet, { defval: '' });
@@ -82,17 +90,19 @@ export async function parseProjectExcel(buffer: ArrayBuffer): Promise<ExcelProje
       currentModule = '';
     }
     if (nextModule) currentModule = nextModule;
-    const description = text(row['Task']);
-    if (!currentProject || !currentModule || !description) continue;
+    const feature = text(row['Feature']);
+    const title = text(row['Task']) || (inheritedFeatureRows.has((row as ExcelRow & { __rowNum__: number }).__rowNum__) ? '' : feature);
+    if (!currentProject || !currentModule || !title) continue;
 
     const startDate = normalizeDate(row['Start'], today, XLSX.SSF.parse_date_code);
     const dueDateCandidate = normalizeDate(row['End'], startDate, XLSX.SSF.parse_date_code);
     const dueDate = dueDateCandidate < startDate ? startDate : dueDateCandidate;
     const project = grouped.get(currentProject) ?? { name: currentProject, tasks: [] };
     project.tasks.push({
-      title: description,
+      title,
       module: currentModule,
-      feature: text(row['Feature']),
+      ownerName: text(row['Owner']),
+      feature,
       description: text(row['เพิ่มเติม']),
       status: normalizeStatus(row['Status']),
       startDate,

@@ -73,13 +73,15 @@ interface WorkspaceContextValue {
   updateProjectMembers: (projectId: string, memberIds: string[]) => Promise<boolean>;
   deleteProject: (projectId: string) => Promise<boolean>;
   importProjects: (input: ImportProjectsInput) => Promise<ImportProjectsResult | null>;
+  updateExcelAlias: (alias: string) => Promise<boolean>;
   createTask: (input: CreateTaskInput) => Promise<Task | null>;
   updateTask: (taskId: string, input: UpdateTaskInput) => Promise<Task | null>;
   moveTaskStatus: (taskId: string, newStatus: TaskStatus) => Promise<boolean>;
   approveTask: (taskId: string) => Promise<boolean>;
-  rejectTask: (taskId: string) => Promise<boolean>;
+  rejectTask: (taskId: string, reason?: string, image?: string) => Promise<boolean>;
   deleteTask: (taskId: string) => Promise<boolean>;
   addComment: (taskId: string, text: string) => Promise<boolean>;
+  submitTask: (taskId: string, text: string, image?: string) => Promise<boolean>;
   saveCollaboratorDetail: (taskId: string, text: string) => Promise<void>;
   createMilestone: (input: CreateMilestoneInput) => Promise<Milestone | null>;
   updateMilestone: (milestoneId: string, input: UpdateMilestoneInput) => Promise<Milestone | null>;
@@ -435,6 +437,10 @@ export function WorkspaceProvider({
       const project = projects.find((p) => p.id === task?.projectId);
       if (!currentUser || !task || !project) return false;
       if (task.status === newStatus) return true;
+      if (task.status === 'review' && newStatus === 'in_progress') {
+        showToast('กรุณาเปิดงานและระบุสิ่งที่ต้องแก้ไขก่อนส่งกลับ', 'warning');
+        return false;
+      }
 
       const check = validateTaskStatusTransition(currentUser, task, newStatus, project);
       if (!check.allowed) {
@@ -482,15 +488,16 @@ export function WorkspaceProvider({
   );
 
   const rejectTask = useCallback(
-    async (taskId: string): Promise<boolean> => {
+    async (taskId: string, reason = '', image?: string): Promise<boolean> => {
       const task = tasks.find((t) => t.id === taskId);
       const project = projects.find((p) => p.id === task?.projectId);
       if (!currentUser || !task || !project || !canApproveOrRejectTask(currentUser, task, project)) {
         showToast('คุณไม่มีสิทธิ์ส่งกลับแก้ไขงานนี้', 'error');
         return false;
       }
+      if (!reason?.trim()) { showToast('กรุณาระบุสิ่งที่ต้องแก้ไข', 'error'); return false; }
       try {
-        await repository.updateTask(taskId, { status: 'in_progress' });
+        await repository.returnTask(taskId, currentUser.id, reason, image);
         await reload();
         showToast(`ส่งงาน "${task.title}" กลับไปแก้ไขเพิ่มเติม`, 'warning');
         if (task.status !== 'in_progress') notifyTask(task, 'in_progress');
@@ -557,6 +564,25 @@ export function WorkspaceProvider({
     },
     [currentUser, tasks, projects, repository, reload, showToast],
   );
+
+  const submitTask = useCallback(async (taskId: string, text: string, image?: string): Promise<boolean> => {
+    const task = tasks.find((item) => item.id === taskId);
+    const project = projects.find((item) => item.id === task?.projectId);
+    if (!currentUser || !task || !project || task.status !== 'in_progress' || !canCommentOnTask(currentUser, task, project) || !validateTaskStatusTransition(currentUser, task, 'review', project).allowed) {
+      showToast('คุณไม่มีสิทธิ์ส่งงานนี้', 'error');
+      return false;
+    }
+    try {
+      await repository.submitTask(taskId, currentUser.id, text, image);
+      await reload();
+      notifyTask(task, 'review');
+      showToast('ส่งงานเพื่อตรวจสอบแล้ว', 'success');
+      return true;
+    } catch (err) {
+      showToast(formatRepoError(err, 'ส่งงานไม่สำเร็จ'), 'error');
+      return false;
+    }
+  }, [currentUser, tasks, projects, repository, reload, notifyTask, showToast]);
 
   const createUser = useCallback(
     async (input: CreateUserInput): Promise<User | null> => {
@@ -721,6 +747,18 @@ export function WorkspaceProvider({
         updateProjectMembers,
         deleteProject,
         importProjects,
+        updateExcelAlias: async (alias) => {
+          if (!currentUser || !repository.updateExcelAlias) return false;
+          try {
+            await repository.updateExcelAlias(currentUser.id, alias);
+            await reload();
+            showToast('บันทึกชื่อสำหรับ Excel แล้ว', 'success');
+            return true;
+          } catch (err) {
+            showToast(formatRepoError(err, 'บันทึกชื่อไม่สำเร็จ'), 'error');
+            return false;
+          }
+        },
         createTask,
         updateTask,
         moveTaskStatus,
@@ -728,6 +766,7 @@ export function WorkspaceProvider({
         rejectTask,
         deleteTask,
         addComment,
+        submitTask,
         saveCollaboratorDetail,
         createMilestone,
         updateMilestone,

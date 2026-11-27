@@ -5,6 +5,7 @@ export type TaskPriority = 'low' | 'medium' | 'high' | 'urgent';
 export interface User {
   id: string;
   name: string;
+  excelAlias?: string;
   email: string;
   password?: string;
   role: UserRole;
@@ -26,6 +27,7 @@ export interface TaskComment {
   userId: string;
   text: string;
   createdAt: string;
+  image?: string;
 }
 
 export interface Task {
@@ -93,6 +95,9 @@ export interface UpdateProjectInput {
 export interface ImportProjectTaskInput {
   title: string;
   module?: string;
+  ownerName?: string;
+  assigneeId?: string;
+  collaboratorIds?: string[];
   feature: string;
   description: string;
   status: TaskStatus;

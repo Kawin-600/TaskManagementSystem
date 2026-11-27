@@ -1,8 +1,28 @@
 import { describe, expect, it } from 'vitest';
 import * as XLSX from 'xlsx';
-import { parseProjectExcel } from '../excelProjectImport';
+import { parseProjectExcel, splitOwnerNames } from '../excelProjectImport';
 
 describe('parseProjectExcel', () => {
+  it('splits multiple owners while preserving spaces in names and their order', () => {
+    expect(splitOwnerNames('Alice Smith, Bob; Charlie / David\nEve')).toEqual(['Alice Smith', 'Bob', 'Charlie', 'David', 'Eve']);
+    expect(splitOwnerNames('')).toEqual([]);
+  });
+  it('imports feature-only rows when Task is empty', async () => {
+    const sheet = XLSX.utils.aoa_to_sheet([
+      ['ประเภท', 'Module', 'Feature', 'Task'],
+      ['ลอยกระทง', 'เว็บแอปพลิเคชัน', 'ออกแบบเว็บ', ''],
+      ['', '', 'ออกแบบกระทงกระดาษ', ''],
+      ['', '', '', ''],
+    ]);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, sheet, 'Tasks');
+    const preview = await parseProjectExcel(XLSX.write(workbook, { type: 'array', bookType: 'xlsx' }) as ArrayBuffer);
+    expect(preview.projects[0]).toMatchObject({ name: 'ลอยกระทง', tasks: [
+      { title: 'ออกแบบเว็บ', feature: 'ออกแบบเว็บ', module: 'เว็บแอปพลิเคชัน' },
+      { title: 'ออกแบบกระทงกระดาษ', feature: 'ออกแบบกระทงกระดาษ', module: 'เว็บแอปพลิเคชัน' },
+    ] });
+    expect(preview.rowCount).toBe(2);
+  });
   it('assigns a merged Feature to every task it spans without filling unrelated blank cells', async () => {
     const sheet = XLSX.utils.aoa_to_sheet([
       ['ประเภท', 'Module', 'Feature', 'Task'],

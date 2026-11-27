@@ -19,6 +19,7 @@ import {
   canEditTask,
   canSetTaskPriority,
   getAssignableMembers,
+  validateTaskStatusTransition,
 } from '../../domain/rbac';
 import { useAuth } from '../../state/AuthContext';
 import { useWorkspace } from '../../state/WorkspaceContext';
@@ -50,6 +51,7 @@ export function TaskDetailModal({ taskId, onClose }: TaskDetailModalProps) {
     rejectTask,
     deleteTask,
     addComment,
+    submitTask,
     saveCollaboratorDetail,
   } = useWorkspace();
 
@@ -76,6 +78,17 @@ export function TaskDetailModal({ taskId, onClose }: TaskDetailModalProps) {
   const [commentInput, setCommentInput] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [submissionText, setSubmissionText] = useState('');
+  const [submissionLink, setSubmissionLink] = useState('');
+  const [submissionImage, setSubmissionImage] = useState('');
+  const [imageName, setImageName] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [returnReason, setReturnReason] = useState('');
+  const [returning, setReturning] = useState(false);
+  const [returnImage, setReturnImage] = useState('');
+  const [returnImageName, setReturnImageName] = useState('');
+  const [readingReturnImage, setReadingReturnImage] = useState(false);
+  const [completedTab, setCompletedTab] = useState<'details' | 'history' | 'comments'>('details');
 
   const taskIdKey = task?.id ?? null;
 
@@ -95,6 +108,16 @@ export function TaskDetailModal({ taskId, onClose }: TaskDetailModalProps) {
     setCommentInput('');
     setFormError(null);
     setConfirmingDelete(false);
+    setSubmissionText('');
+    setSubmissionLink('');
+    setSubmissionImage('');
+    setImageName('');
+    setReturnReason('');
+    setReturning(false);
+    setReturnImage('');
+    setReturnImageName('');
+    setReadingReturnImage(false);
+    setCompletedTab('details');
     // Sync form only when switching to a different task, not when comments reload
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [taskIdKey]);
@@ -117,6 +140,80 @@ export function TaskDetailModal({ taskId, onClose }: TaskDetailModalProps) {
   const projectMilestones = visibleMilestones.filter(
     (milestone) => milestone.projectId === task.projectId,
   );
+
+  const history = task.comments.filter((comment) => comment.text.startsWith('ส่งงานเพื่อตรวจสอบ') || comment.text.startsWith('ส่งกลับแก้ไข\n'));
+  const historySection = history.length > 0 && (
+    <section className="space-y-3 border-t border-slate-200 pt-4" aria-label="ประวัติการส่งและตรวจงาน">
+      <h4 className="font-bold text-slate-800">ประวัติการส่งและตรวจงาน</h4>
+      {history.map((comment, index) => {
+        const isReturn = comment.text.startsWith('ส่งกลับแก้ไข\n');
+        const round = history.slice(0, index + 1).filter((item) => item.text.startsWith('ส่งงานเพื่อตรวจสอบ')).length;
+        const details = comment.text.replace(isReturn ? /^ส่งกลับแก้ไข\n/ : /^ส่งงานเพื่อตรวจสอบ\n?/, '');
+        return <article key={comment.id} className={`space-y-2 rounded-xl border p-3 ${isReturn ? 'border-amber-200 bg-amber-50' : 'border-slate-200 bg-slate-50'}`}>
+          <div className="flex flex-wrap items-center justify-between gap-2"><strong className={isReturn ? 'text-amber-900' : 'text-indigo-900'}>{isReturn ? 'ส่งกลับแก้ไข' : 'ส่งงาน'}{round > 0 ? ` · รอบที่ ${round}` : ''}</strong><time className="text-xs text-slate-500">{comment.createdAt.replace('T', ' ').slice(0, 16)}</time></div>
+          <p className="text-xs text-slate-600">โดย {users.find((user) => user.id === comment.userId)?.name ?? 'ผู้ใช้งาน'}</p>
+          {details && <p className="whitespace-pre-wrap break-words text-slate-700">{tokenizeCommentText(details).map((segment, segmentIndex) => segment.type === 'link' ? <a key={segmentIndex} href={segment.href} target="_blank" rel="noopener noreferrer" className="text-indigo-600 underline">{segment.value}</a> : <span key={segmentIndex}>{segment.value}</span>)}</p>}
+          {comment.image && <a href={comment.image} target="_blank" rel="noopener noreferrer"><img src={comment.image} alt={isReturn ? 'ภาพประกอบคำแนะนำ' : 'ภาพผลงานที่ส่ง'} className="max-h-48 max-w-full rounded-xl object-contain" /></a>}
+        </article>;
+      })}
+    </section>
+  );
+
+  if (task.status === 'in_progress') {
+    const canSubmit = commentable && validateTaskStatusTransition(currentUser, task, 'review', project).allowed;
+    const feedback = [...task.comments].reverse().find((comment) => comment.text.startsWith('ส่งกลับแก้ไข\n'));
+    const lastSubmissionIndex = task.comments.reduce((last, comment, index) => comment.text.startsWith('ส่งงานเพื่อตรวจสอบ') ? index : last, -1);
+    const feedbackIndex = feedback ? task.comments.findIndex((comment) => comment.id === feedback.id) : -1;
+    const handleImage = (file?: File) => {
+      setSubmissionImage('');
+      setImageName('');
+      setFormError(null);
+      if (!file) return;
+      if (!['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(file.type) || file.size > 1024 * 1024) {
+        setFormError('กรุณาเลือกภาพ JPG, PNG, WebP หรือ GIF ขนาดไม่เกิน 1 MB');
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = () => { if (typeof reader.result === 'string') { setSubmissionImage(reader.result); setImageName(file.name); } };
+      reader.onerror = () => setFormError('อ่านไฟล์ภาพไม่สำเร็จ กรุณาลองอีกครั้ง');
+      reader.readAsDataURL(file);
+    };
+    const handleSubmit = async (event: FormEvent) => {
+      event.preventDefault();
+      if (submitting) return;
+      if (!submissionText.trim() && !submissionLink.trim() && !submissionImage) {
+        setFormError('กรุณาระบุรายละเอียด ลิงก์ หรือแนบภาพอย่างน้อยหนึ่งรายการ');
+        return;
+      }
+      if (submissionLink.trim()) {
+        try {
+          const url = new URL(submissionLink.trim());
+          if (!['http:', 'https:'].includes(url.protocol)) throw new Error();
+        } catch { setFormError('กรุณาระบุลิงก์ที่ขึ้นต้นด้วย http:// หรือ https://'); return; }
+      }
+      setFormError(null);
+      setSubmitting(true);
+      const text = ['ส่งงานเพื่อตรวจสอบ', submissionText.trim(), submissionLink.trim()].filter(Boolean).join('\n');
+      if (await submitTask(task.id, text, submissionImage || undefined)) onClose();
+      setSubmitting(false);
+    };
+    return (
+      <Modal isOpen onClose={onClose} title="ส่งงาน" subtitle={`${task.title} · ${project?.name ?? ''}`} headerAccent={project?.color ?? '#4f46e5'}>
+        {canSubmit ? (
+          <form onSubmit={handleSubmit} className="space-y-4 text-sm">
+            <p className="rounded-xl bg-indigo-50 p-3 text-indigo-900">ส่งผลงานเพื่อให้ผู้รับผิดชอบตรวจสอบ เมื่อส่งแล้วสถานะจะเปลี่ยนเป็นรอตรวจสอบ</p>
+            {feedback && feedbackIndex > lastSubmissionIndex && <section className="space-y-2 rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-950"><h4 className="font-bold">งานถูกส่งกลับให้แก้ไข</h4><p className="text-xs">โดย {users.find((user) => user.id === feedback.userId)?.name ?? 'ผู้ตรวจ'} · {feedback.createdAt.replace('T', ' ').slice(0, 16)}</p><p className="whitespace-pre-wrap break-words">{feedback.text.replace(/^ส่งกลับแก้ไข\n/, '')}</p>{feedback.image && <a href={feedback.image} target="_blank" rel="noopener noreferrer"><img src={feedback.image} alt="ภาพประกอบคำแนะนำจากผู้ตรวจ" className="max-h-80 max-w-full rounded-xl object-contain" /></a>}</section>}
+            {formError && <p role="alert" className="rounded-xl bg-rose-50 p-3 text-rose-700">{formError}</p>}
+            <div><label htmlFor="submission-details" className="mb-1 block font-semibold text-slate-700">รายละเอียดผลงาน</label><textarea id="submission-details" rows={4} value={submissionText} onChange={(e) => setSubmissionText(e.target.value)} className="w-full rounded-xl border border-slate-200 p-3" placeholder="อธิบายผลงานที่ส่ง" /></div>
+            <div><label htmlFor="submission-link" className="mb-1 block font-semibold text-slate-700">ลิงก์ผลงาน</label><input id="submission-link" type="url" value={submissionLink} onChange={(e) => setSubmissionLink(e.target.value)} className="w-full rounded-xl border border-slate-200 p-3" placeholder="https://..." /></div>
+            <div><label htmlFor="submission-image" className="mb-1 block font-semibold text-slate-700">แนบภาพ</label><input id="submission-image" type="file" accept="image/jpeg,image/png,image/webp,image/gif" onChange={(e) => handleImage(e.target.files?.[0])} className="block w-full text-slate-600" /><p className="mt-1 text-xs text-slate-500">JPG, PNG, WebP หรือ GIF ไม่เกิน 1 MB</p>{submissionImage && <img src={submissionImage} alt={`ภาพที่แนบ ${imageName}`} className="mt-3 max-h-48 rounded-xl object-contain" />}</div>
+            {historySection}
+            <div className="flex justify-end gap-2 border-t border-slate-100 pt-4"><button type="button" onClick={onClose} className="rounded-xl border border-slate-200 px-4 py-2 font-semibold text-slate-600">ปิด</button><button type="submit" disabled={submitting} className="rounded-xl bg-indigo-600 px-5 py-2 font-semibold text-white disabled:opacity-50">{submitting ? 'กำลังส่งงาน...' : 'ส่งงาน'}</button></div>
+          </form>
+        ) : <div className="space-y-4 text-sm"><p className="text-slate-600">ผู้รับผิดชอบงานสามารถส่งผลงานเพื่อตรวจสอบได้จากหน้านี้</p>{historySection}</div>}
+      </Modal>
+    );
+  }
 
   const handleSave = async (e: FormEvent) => {
     e.preventDefault();
@@ -155,7 +252,10 @@ export function TaskDetailModal({ taskId, onClose }: TaskDetailModalProps) {
   };
 
   const handleReject = async () => {
-    const ok = await rejectTask(task.id);
+    if (!returnReason.trim()) { setFormError('กรุณาระบุสิ่งที่ต้องแก้ไข'); return; }
+    setReturning(true);
+    const ok = await rejectTask(task.id, returnReason, returnImage || undefined);
+    setReturning(false);
     if (ok) onClose();
   };
 
@@ -163,6 +263,47 @@ export function TaskDetailModal({ taskId, onClose }: TaskDetailModalProps) {
     const ok = await deleteTask(task.id);
     if (ok) onClose();
   };
+
+  if (task.status === 'review') {
+    const submitted = task.comments.filter((comment) => comment.text.startsWith('ส่งงานเพื่อตรวจสอบ\n') || comment.text === 'ส่งงานเพื่อตรวจสอบ');
+    const submissions = submitted.length ? submitted : task.comments;
+    const handleReturnImage = (file?: File) => {
+      setReturnImage('');
+      setReturnImageName('');
+      setFormError(null);
+      if (!file) return;
+      if (!['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(file.type) || file.size > 1024 * 1024) {
+        setFormError('กรุณาเลือกภาพ JPG, PNG, WebP หรือ GIF ขนาดไม่เกิน 1 MB');
+        return;
+      }
+      setReadingReturnImage(true);
+      const reader = new FileReader();
+      reader.onload = () => { if (typeof reader.result === 'string') { setReturnImage(reader.result); setReturnImageName(file.name); } setReadingReturnImage(false); };
+      reader.onerror = () => { setFormError('อ่านไฟล์ภาพไม่สำเร็จ กรุณาลองอีกครั้ง'); setReadingReturnImage(false); };
+      reader.readAsDataURL(file);
+    };
+    return (
+      <Modal isOpen onClose={onClose} title="ตรวจสอบงาน" subtitle={`${task.title} · ${project?.name ?? ''}`} headerAccent={project?.color ?? '#4f46e5'}>
+        <div className="space-y-4 text-sm">
+          <p className="rounded-xl bg-indigo-50 p-3 text-indigo-900">งานนี้กำลังรอการตรวจสอบ</p>
+          <section aria-label="ผลงานที่ส่ง" className="space-y-3">
+            <h4 className="font-bold text-slate-800">ผลงานที่ส่ง</h4>
+            {submissions.length === 0 ? <p className="rounded-xl bg-slate-50 p-4 text-slate-500">ยังไม่มีรายละเอียดผลงานที่ส่งผ่านหน้าส่งงาน</p> : submissions.slice().reverse().map((comment) => {
+              const author = users.find((user) => user.id === comment.userId);
+              const details = comment.text.replace(/^ส่งงานเพื่อตรวจสอบ\n?/, '');
+              return <article key={comment.id} className="space-y-3 rounded-xl border border-slate-200 p-4">
+                <div className="flex flex-wrap justify-between gap-2 text-xs text-slate-500"><span className="font-semibold text-slate-700">ส่งโดย {author?.name ?? 'ผู้ใช้งาน'}</span><time>{comment.createdAt.replace('T', ' ').slice(0, 16)}</time></div>
+                {details && <p className="whitespace-pre-wrap break-words text-slate-700">{tokenizeCommentText(details).map((segment, index) => segment.type === 'link' ? <a key={index} href={segment.href} target="_blank" rel="noopener noreferrer" className="text-indigo-600 underline">{segment.value}</a> : <span key={index}>{segment.value}</span>)}</p>}
+                {comment.image && <a href={comment.image} target="_blank" rel="noopener noreferrer"><img src={comment.image} alt="ภาพผลงานที่ส่ง" className="max-h-80 max-w-full rounded-xl object-contain" /></a>}
+              </article>;
+            })}
+          </section>
+          {historySection}
+          {canApprove && <div className="space-y-3 border-t border-slate-100 pt-4"><label htmlFor="return-reason" className="block font-semibold text-slate-700">สิ่งที่ต้องแก้ไข <span className="font-normal text-slate-500">(จำเป็นเมื่อส่งกลับ)</span></label><textarea id="return-reason" rows={3} value={returnReason} onChange={(event) => { setReturnReason(event.target.value); setFormError(null); }} placeholder="ระบุสิ่งที่ต้องแก้ไขให้ชัดเจน" className="w-full rounded-xl border border-slate-200 p-3" /><div><label htmlFor="return-image" className="mb-1 block font-semibold text-slate-700">ภาพประกอบคำแนะนำ (ไม่บังคับ)</label><input id="return-image" type="file" accept="image/jpeg,image/png,image/webp,image/gif" onChange={(event) => handleReturnImage(event.target.files?.[0])} className="block w-full text-slate-600" /><p className="mt-1 text-xs text-slate-500">JPG, PNG, WebP หรือ GIF ไม่เกิน 1 MB</p>{returnImage && <img src={returnImage} alt={`ภาพประกอบที่แนบ ${returnImageName}`} className="mt-3 max-h-48 max-w-full rounded-xl object-contain" />}</div>{formError && <p role="alert" className="text-rose-700">{formError}</p>}<div className="flex flex-wrap justify-end gap-2"><button type="button" disabled={returning || readingReturnImage} onClick={handleReject} className="inline-flex items-center gap-2 rounded-xl border border-rose-200 px-4 py-2 font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-50"><RotateCcw className="h-4 w-4" />{returning ? 'กำลังส่งกลับ...' : 'ส่งกลับแก้ไข'}</button><button type="button" disabled={returning} onClick={handleApprove} className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"><CheckCircle2 className="h-4 w-4" />อนุมัติงาน</button></div></div>}
+        </div>
+      </Modal>
+    );
+  }
 
   const handleAddComment = async () => {
     if (!commentInput.trim()) return;
@@ -202,6 +343,13 @@ export function TaskDetailModal({ taskId, onClose }: TaskDetailModalProps) {
       headerAccent={project?.color ?? '#4f46e5'}
     >
       <div className="space-y-4 text-xs">
+        {task.status === 'completed' && <div role="tablist" aria-label="ข้อมูลงานที่เสร็จสิ้น" className="flex justify-end gap-1 border-b border-slate-200">
+          <button type="button" role="tab" aria-selected={completedTab === 'details'} onClick={() => setCompletedTab('details')} className={`border-b-2 px-4 py-2.5 font-semibold ${completedTab === 'details' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>ข้อมูลงาน</button>
+          <button type="button" role="tab" aria-selected={completedTab === 'history'} onClick={() => setCompletedTab('history')} className={`border-b-2 px-4 py-2.5 font-semibold ${completedTab === 'history' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>ประวัติการทำงาน</button>
+          <button type="button" role="tab" aria-selected={completedTab === 'comments'} onClick={() => setCompletedTab('comments')} className={`border-b-2 px-4 py-2.5 font-semibold ${completedTab === 'comments' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>ความคิด</button>
+        </div>}
+        {task.status === 'completed' && completedTab === 'history' && <div role="tabpanel">{historySection || <p className="py-8 text-center text-slate-500">ยังไม่มีประวัติการส่งและตรวจงาน</p>}</div>}
+        {(task.status !== 'completed' || completedTab === 'details') && <>
         {isStaffCompletedLock && (
           <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3.5 py-2.5 text-emerald-800">
             <Lock className="h-4 w-4 shrink-0 text-emerald-600" />
@@ -523,10 +671,12 @@ export function TaskDetailModal({ taskId, onClose }: TaskDetailModalProps) {
           </section>
         )}
 
+        </>}
+        {(task.status !== 'completed' || completedTab === 'comments') && (
         <div className="space-y-3 border-t border-slate-200 pt-4">
           <h4 className="flex items-center gap-2 font-bold text-slate-800">
             <MessageSquare className="h-4 w-4 text-indigo-500" />
-            <span>ความคิดเห็น &amp; แนบลิงก์ส่งงาน ({task.comments.length})</span>
+            <span>ความคิด</span>
           </h4>
 
           <div className="max-h-40 space-y-2 overflow-y-auto pr-1">
@@ -573,6 +723,7 @@ export function TaskDetailModal({ taskId, onClose }: TaskDetailModalProps) {
                         ),
                       )}
                     </p>
+                    {comment.image && <a href={comment.image} target="_blank" rel="noopener noreferrer"><img src={comment.image} alt="ภาพประกอบการส่งงาน" className="ml-7 mt-2 max-h-48 max-w-full rounded-lg object-contain" /></a>}
                   </div>
                 );
               })
@@ -605,6 +756,7 @@ export function TaskDetailModal({ taskId, onClose }: TaskDetailModalProps) {
             </div>
           )}
         </div>
+        )}
       </div>
     </Modal>
   );

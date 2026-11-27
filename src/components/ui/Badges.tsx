@@ -62,7 +62,7 @@ export function getThaiRoleName(role: UserRole): string {
 export function StatusBadge({ status }: { status: TaskStatus }) {
   return (
     <span
-      className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11px] font-semibold ${STATUS_STYLES[status]}`}
+      className={`inline-flex shrink-0 items-center whitespace-nowrap rounded-full border px-2.5 py-1 text-[11px] font-semibold leading-none ${STATUS_STYLES[status]}`}
     >
       {STATUS_NAMES[status]}
     </span>
@@ -72,7 +72,7 @@ export function StatusBadge({ status }: { status: TaskStatus }) {
 export function PriorityBadge({ priority }: { priority: TaskPriority }) {
   return (
     <span
-      className={`inline-flex items-center rounded px-2 py-0.5 text-[10px] font-bold ${PRIORITY_STYLES[priority]}`}
+      className={`inline-flex shrink-0 items-center whitespace-nowrap rounded-md px-2 py-1 text-[11px] font-semibold leading-none ${PRIORITY_STYLES[priority]}`}
     >
       {PRIORITY_NAMES[priority]}
     </span>

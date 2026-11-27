@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ChangeEvent } from 'react';
 import { AlertCircle, FileSpreadsheet, Upload } from 'lucide-react';
 import { useAuth } from '../../state/AuthContext';
 import { useWorkspace } from '../../state/WorkspaceContext';
-import { parseProjectExcel, type ExcelProjectPreview } from '../../services/excelProjectImport';
+import { parseProjectExcel, splitOwnerNames, type ExcelProjectPreview } from '../../services/excelProjectImport';
 import { Modal } from '../ui/Modal';
 
 interface ExcelProjectImportModalProps {
@@ -12,7 +12,7 @@ interface ExcelProjectImportModalProps {
 
 export function ExcelProjectImportModal({ isOpen, onClose }: ExcelProjectImportModalProps) {
   const { currentUser } = useAuth();
-  const { importProjects } = useWorkspace();
+  const { importProjects, users } = useWorkspace();
   const inputRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<ExcelProjectPreview | null>(null);
@@ -20,6 +20,7 @@ export function ExcelProjectImportModal({ isOpen, onClose }: ExcelProjectImportM
   const [error, setError] = useState<string | null>(null);
   const [isReading, setIsReading] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
+  const [ownerAssignments, setOwnerAssignments] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (!isOpen) return;
@@ -27,6 +28,7 @@ export function ExcelProjectImportModal({ isOpen, onClose }: ExcelProjectImportM
     setPreview(null);
     setSelectedProjectNames(new Set());
     setError(null);
+    setOwnerAssignments({});
     setIsReading(false);
     setIsImporting(false);
   }, [isOpen]);
@@ -41,6 +43,14 @@ export function ExcelProjectImportModal({ isOpen, onClose }: ExcelProjectImportM
     setIsReading(true);
     try {
       const parsed = await parseProjectExcel(await selected.arrayBuffer());
+      const assignments: Record<string, string> = {};
+      for (const project of parsed.projects) for (const task of project.tasks) {
+        for (const owner of splitOwnerNames(task.ownerName)) {
+        const matches = users.filter((user) => user.excelAlias?.trim().toLocaleLowerCase() === owner.toLocaleLowerCase());
+        assignments[owner] = matches.length === 1 ? matches[0].id : currentUser?.id ?? '';
+        }
+      }
+      setOwnerAssignments(assignments);
       setPreview(parsed);
       setSelectedProjectNames(new Set(parsed.projects.map((project) => project.name)));
     } catch (err) {
@@ -60,7 +70,11 @@ export function ExcelProjectImportModal({ isOpen, onClose }: ExcelProjectImportM
     }
     setIsImporting(true);
     const result = await importProjects({
-      projects: selectedProjects,
+      projects: selectedProjects.map((project) => ({ ...project, tasks: project.tasks.map((task) => ({
+        ...task,
+        assigneeId: ownerAssignments[splitOwnerNames(task.ownerName)[0]] || currentUser.id,
+        collaboratorIds: splitOwnerNames(task.ownerName).slice(1).map((owner) => ownerAssignments[owner] || currentUser.id),
+      })) })),
       supervisorId: currentUser.id,
       sourceName: file.name,
     });
@@ -70,6 +84,7 @@ export function ExcelProjectImportModal({ isOpen, onClose }: ExcelProjectImportM
 
   const selectedProjects = preview?.projects.filter((project) => selectedProjectNames.has(project.name)) ?? [];
   const selectedTaskCount = selectedProjects.reduce((total, project) => total + project.tasks.length, 0);
+  const ownerNames = [...new Set(selectedProjects.flatMap((project) => project.tasks.flatMap((task) => splitOwnerNames(task.ownerName))))];
 
   const toggleProject = (projectName: string) => {
     setSelectedProjectNames((current) => {
@@ -174,6 +189,24 @@ export function ExcelProjectImportModal({ isOpen, onClose }: ExcelProjectImportM
                   </span>
                 </label>
               ))}
+            </div>
+          </div>
+        )}
+
+        {preview && ownerNames.length > 0 && (
+          <div className="space-y-3 rounded-xl border border-slate-200 p-4">
+            <p className="font-bold text-slate-800">จับคู่ Owner จาก Excel</p>
+            <p className="text-slate-500">Owner คนแรกเป็นผู้รับผิดชอบหลัก คนที่เหลือเป็นผู้มีส่วนร่วม โดยคั่นชื่อด้วย , ; / หรือขึ้นบรรทัดใหม่ ชื่อที่ไม่พบหรือซ้ำกันกำหนดเป็นผู้นำเข้า โปรดตรวจสอบก่อนนำเข้า</p>
+            <div className="max-h-56 space-y-2 overflow-y-auto">
+              {ownerNames.map((owner) => {
+                const matches = users.filter((user) => user.excelAlias?.trim().toLocaleLowerCase() === owner.toLocaleLowerCase());
+                return <label key={owner} className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="font-medium text-slate-700">{owner} {matches.length !== 1 && <span className="text-amber-700">({matches.length ? 'ชื่อซ้ำ' : 'ไม่พบชื่อ'})</span>}</span>
+                  <select aria-label={`ผู้รับผิดชอบสำหรับ ${owner}`} value={ownerAssignments[owner] ?? currentUser?.id ?? ''} onChange={(event) => setOwnerAssignments((current) => ({ ...current, [owner]: event.target.value }))} className="rounded-lg border border-slate-200 px-2 py-1.5">
+                    {users.map((user) => <option key={user.id} value={user.id}>{user.name}{user.excelAlias ? ` (${user.excelAlias})` : ''}</option>)}
+                  </select>
+                </label>;
+              })}
             </div>
           </div>
         )}
